@@ -27,10 +27,12 @@ OptMem fixes the two halves separately:
 git clone https://github.com/VictorTaelin/OptMem ~/OptMem
 export PATH="$HOME/OptMem:$PATH"
 export MEMORY_DIR="$HOME/memory"     # required; there is no default
+mkdir -p "$MEMORY_DIR"               # this is what creates the identity
 ```
 
 `MEMORY_DIR` is the only machine-specific fact in the system. One machine, one
-`MEMORY_DIR`, one identity.
+`MEMORY_DIR`, one identity. `memo` never creates that directory itself: if it
+did, one typo would open a second, empty identity instead of an error.
 
 ## Use
 
@@ -168,7 +170,10 @@ $MEMORY_DIR/
   TREE/4      record, indexed   size. each block written once, unless forgotten.
   TREE/8      by position
   ...
-  config      ENTRY_CHARS=280   longest a memory may be
+  config      optional. absent on a normal store; the defaults below live in
+              `memo` and are the only home for them.
+
+              ENTRY_CHARS=280   longest a memory may be
               WAKE_LINES=256    how many lines `memo wake` prints (~16k tokens)
               PART_CHARS=20000  how much of it fits in one command's output
               PART_LINES=500    ...and in how many lines

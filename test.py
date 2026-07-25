@@ -128,6 +128,18 @@ smoke = subprocess.run(memo + ["wake"], env=dict(os.environ, MEMORY_DIR=d),
 check(smoke.returncode == 0 and "No memories yet" in smoke.stdout,
       "the memo CLI does not run: " + smoke.stdout + smoke.stderr)
 
+# a typo in MEMORY_DIR must not silently open a second, empty identity
+ghost = subprocess.run(memo + ["wake"], capture_output=True, text=True,
+                       env=dict(os.environ, MEMORY_DIR=d + "-typo"))
+check(ghost.returncode == 1 and "does not exist" in ghost.stderr,
+      "a missing MEMORY_DIR was created instead of reported")
+check(not os.path.exists(d + "-typo"), "a missing MEMORY_DIR was created")
+noenv = subprocess.run(memo + ["wake"], capture_output=True, text=True,
+                       env={k: v for k, v in os.environ.items()
+                            if k != "MEMORY_DIR"})
+check(noenv.returncode == 1 and "MEMORY_DIR is not set" in noenv.stderr,
+      "an unset MEMORY_DIR must fail loudly")
+
 
 r = run("note", "x" * 281)
 check(r.returncode == 1 and "Too long" in r.stderr, "over-long note accepted")
@@ -146,7 +158,9 @@ with open(os.path.join(d, "seed.txt"), "w") as f:
         f.write("%s memory number %d, a thing that happened\n"
                 % ((day + datetime.timedelta(days=i // 5)).isoformat(), i))
 r = run("import", os.path.join(d, "seed.txt"))
-check("imported %d" % N in r.stdout, "import failed: " + r.stdout + r.stderr)
+check("Imported %d" % N in r.stdout, "import failed: " + r.stdout + r.stderr)
+check(not os.path.exists(os.path.join(d, "config")),
+      "a store wrote its own config file: the defaults are now frozen in it")
 
 r = run("wake")
 check(r.returncode == 1 and "Cannot wake" in r.stdout,
@@ -218,6 +232,7 @@ check(r.returncode == 0 and "Nothing left to compress" in r.stdout,
 # recall reaches memories the summaries lost
 r = run("recall", "memory number 7,")
 check(r.returncode == 0 and "#7 " in r.stdout, "recall missed a memory")
+check("1 match." in r.stdout, "a single match is not `1 matches`: " + r.stdout)
 
 def treesize():
     t = os.path.join(d, "TREE")
@@ -277,6 +292,23 @@ run("note", "a note that lands between two wake calls")
 check(run("wake", "1", str(T0)).stdout == before.stdout,
       "a note between parts changed an already-rendered part")
 check(run("wake", "1", str(T0 + 99)).returncode == 1, "wake accepted a future T")
+
+# ...and the agent pays that note's compressions on the spot, as it is told
+# to. The tree then holds MORE blocks than the snapshot needs: a level must
+# never count as negative work, or the rest of the wake is refused with an
+# impossible number.
+while True:
+    r = run("sleep")
+    if "Nothing left to compress" in r.stdout:
+        break
+    run("sleep", nap_id(r.stdout), "settled mid-wake")
+r = run("wake", "1", str(T0))
+check(r.returncode == 0 and r.stdout == before.stdout,
+      "a compression paid mid-wake broke the rest of the wake:\n"
+      + r.stdout + r.stderr)
+for T in list(range(1, 40)) + [T0 - 1, T0, T0 + 1]:
+    check(cli.pending_count(d, T) == len(cli.pending(d, T)),
+          "pending_count disagrees with pending at T=%d" % T)
 
 # recall must not hand back more than a harness will carry
 r = run("recall", "memory number")

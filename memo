@@ -47,6 +47,13 @@ def store():
     if not d:
         die("MEMORY_DIR is not set. Example: export MEMORY_DIR=~/memory")
     d = os.path.expanduser(d)
+    # The directory is never created here. A typo in MEMORY_DIR would then
+    # open an empty store, and the agent would wake with no past and start
+    # writing a second identity. Making the directory IS creating the
+    # identity, and that is a deliberate act: mkdir.
+    if not os.path.isdir(d):
+        die("MEMORY_DIR=%s does not exist.\nIf this is a new identity, run: "
+            "mkdir -p %s" % (d, d))
     os.makedirs(os.path.join(d, "TREE"), exist_ok=True)
     p = os.path.join(d, "LOG.txt")
     if not os.path.exists(p):
@@ -55,12 +62,12 @@ def store():
 
 
 def config(d):
+    """Optional overrides in $MEMORY_DIR/config. The file is never written:
+    a store that kept its own copy of the defaults would freeze them, and
+    updating the tool would stop changing how it behaves."""
     global ENTRY_CHARS, WAKE_LINES, PART_CHARS, PART_LINES
     p = os.path.join(d, "config")
     if not os.path.exists(p):
-        with open(p, "w") as f:
-            f.write("ENTRY_CHARS=%d\nWAKE_LINES=%d\nPART_CHARS=%d\nPART_LINES=%d\n"
-                    % (ENTRY_CHARS, WAKE_LINES, PART_CHARS, PART_LINES))
         return
     for line in open(p):
         line = line.split("#")[0].strip()
@@ -223,10 +230,20 @@ def die(msg):
     sys.exit(1)
 
 
+def plural(n, word):
+    if n == 1:
+        return "1 " + word
+    if word.endswith("y"):
+        word = word[:-1] + "ie"
+    elif word.endswith(("s", "h", "x")):
+        word += "e"
+    return "%d %ss" % (n, word)
+
+
 def check(text):
     text = text.strip()
     if not text:
-        die("Empty.")
+        die("Empty. A memory is one line of text.")
     if "\n" in text or "\r" in text:
         die("%d lines. A memory is one line: merge them, or note them "
             "separately." % (text.count("\n") + 1))
@@ -255,9 +272,12 @@ def pending(d, T, limit=None):
 
 
 def pending_count(d, T):
+    """How many blocks pending() would list, without listing them. A level can
+    hold MORE blocks than T needs -- T is a snapshot, and memories keep
+    arriving while an agent reads -- so each level is clamped at zero."""
     n, size = 0, 2
     while size <= T:
-        n += T // size - count(tree_path(d, size), TREE_REC)
+        n += max(0, T // size - count(tree_path(d, size), TREE_REC))
         size *= 2
     return n
 
@@ -266,16 +286,20 @@ def nap_prompt(d, lo, hi, left):
     if hi - lo <= RAW_MAX:
         body = "\n".join("  #%d %s %s" % e for e in log_slice(d, lo, hi))
     else:
-        mid = (lo + hi) // 2
-        body = "\n".join("  #%d-%d %s" % (a, b - 1, tree_get(d, a, b) or "?")
-                         for a, b in ((lo, mid), (mid, hi)))
-    tail = ("1 compression remains" if left == 1 else
-            "%d compressions remain" % left)
+        mid, halves = (lo + hi) // 2, []
+        for a, b in ((lo, mid), (mid, hi)):
+            s = tree_get(d, a, b)
+            if s is None:
+                die("Summary %d-%d is missing. Run: memo sleep" % (a, b - 1))
+            halves.append("  #%d-%d %s" % (a, b - 1, s))
+        body = "\n".join(halves)
+    tail = "" if not left else "\n%s after this one." % (
+        "1 compression remains" if left == 1 else
+        "%d compressions remain" % left)
     return ("Compress memories #%d-%d into one line of at most %d characters.\n"
             "Keep every name, number, date, decision and outcome.\n"
             "Drop wording, not facts. Invent nothing.\n\n"
-            "%s\n\n"
-            "%s after this one.\n"
+            "%s\n%s\n"
             "Run: memo sleep %d-%d \"<your line>\""
             % (lo, hi - 1, ENTRY_CHARS, body, tail, lo, hi - 1))
 
@@ -315,15 +339,14 @@ def cmd_wake(d, args):
         if len(args) == 2:
             T = int(args[1])
             if T > now:
-                die("T=%d, but the memory holds %d entries. Run: memo wake"
-                    % (T, now))
+                die("T=%d, but the memory holds %s. Run: memo wake"
+                    % (T, plural(now, "entry")))
     # A part is rendered as of T, so a note landing between two parts cannot
     # shift a boundary and drop a line.
     n = pending_count(d, T)
     if n:
         print("Cannot wake: %s pending. Do %s, then run memo wake again.\n"
-              % ("1 compression" if n == 1 else "%d compressions" % n,
-                 "it" if n == 1 else "them"))
+              % (plural(n, "compression"), "it" if n == 1 else "them"))
         print(next_nap(d, T))
         sys.exit(1)
     if not T:
@@ -341,8 +364,8 @@ def cmd_wake(d, args):
             lines.append("#%d-%d %s" % (lo, hi - 1, s))
     parts = paginate(lines)
     if not 1 <= k <= len(parts):
-        die("No part %d: the memory has %d parts. Run: memo wake"
-            % (k, len(parts)))
+        die("No part %d: the memory has %s. Run: memo wake"
+            % (k, plural(len(parts), "part")))
     if len(parts) > 1:
         print("Your memory, part %d of %d, oldest first." % (k, len(parts)))
     print("\n".join(parts[k - 1]))
@@ -410,8 +433,8 @@ def cmd_forget(d, args):
     gone = tree_drop(d, lo, hi)
     if not gone:
         die("No summary at %s." % args[0])
-    print("Forgot %d summaries, from %d-%d up. Run: memo sleep"
-          % (len(gone), gone[0][0], gone[0][1] - 1))
+    print("Forgot %s, from %d-%d up. Run: memo sleep"
+          % (plural(len(gone), "summary"), gone[0][0], gone[0][1] - 1))
 
 
 def cmd_recall(d, args):
@@ -436,9 +459,10 @@ def cmd_recall(d, args):
         out.append(line)
     print("\n".join(reversed(out)))
     if len(out) < len(hits):
-        print("Newest %d of %d matches. Narrow the regex." % (len(out), len(hits)))
+        print("Newest %d of %s. Narrow the regex."
+              % (len(out), plural(len(hits), "match")))
     else:
-        print("%d matches." % len(hits))
+        print("%s." % plural(len(hits), "match"))
 
 
 def cmd_import(d, args):
@@ -446,9 +470,13 @@ def cmd_import(d, args):
     For bootstrapping an identity from older records. Used once."""
     if len(args) != 1:
         die("usage: memo import <file>   # lines of 'YYYY-MM-DD <text>'")
+    try:
+        src = open(args[0]).readlines()
+    except OSError as e:
+        die("Cannot read %s: %s" % (args[0], e.strerror))
     last = log_get(d, log_len(d) - 1)[1] if log_len(d) else "0000-00-00"
     out = []
-    for i, line in enumerate(open(args[0]), 1):
+    for i, line in enumerate(src, 1):
         line = line.rstrip("\n")
         if not line.strip():
             continue
@@ -463,11 +491,14 @@ def cmd_import(d, args):
             die("line %d: %d bytes, limit %d." % (i, len(text.encode()), ENTRY_CHARS))
         out.append((date, text))
         last = date
+    if not out:
+        die("%s has no memories." % args[0])
     base = log_append(d, out)
-    print("imported %d memories, #%d to #%d." % (len(out), base, base + len(out) - 1))
+    print("Imported %s, #%d to #%d."
+          % (plural(len(out), "memory"), base, base + len(out) - 1))
     n = pending_count(d, log_len(d))
     if n:
-        print("%d compressions pending. Run: memo sleep" % n)
+        print("%s pending. Run: memo sleep" % plural(n, "compression"))
 
 
 COMMANDS = {"wake": cmd_wake, "note": cmd_note, "sleep": cmd_sleep,
@@ -475,9 +506,13 @@ COMMANDS = {"wake": cmd_wake, "note": cmd_note, "sleep": cmd_sleep,
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
+    if len(sys.argv) < 2:
         print(__doc__.strip())
-        sys.exit(0 if len(sys.argv) < 2 else 1)
+        sys.exit(0)
+    if sys.argv[1] not in COMMANDS:
+        print("No such command: %s\n" % sys.argv[1], file=sys.stderr)
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(1)
     d = store()
     config(d)
     COMMANDS[sys.argv[1]](d, sys.argv[2:])
