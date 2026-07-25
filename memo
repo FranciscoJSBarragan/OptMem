@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""OptMem: a permanent, append-only memory for AI agents.
+
+  memo wake                print who you are
+  memo note "..."          record a memory
+  memo sleep [id "..."]    compress
+  memo recall <regex>      search the raw log
+  memo forget <id>         drop a wrong summary so it is compressed again
+  memo import <file>       bulk-append historical memories (bootstrap only)
+
+Everything lives in $MEMORY_DIR as two append-only text files. See README.md.
+"""
+
+import datetime
+import fcntl
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from blocks import complete, cover  # noqa: E402
+
+ENTRY_CHARS = 280
+WAKE_LINES = 320
+RAW_MAX = 16  # blocks up to this many memories compress from the raw log
+
+
+# ---------------------------------------------------------------- store
+
+def store():
+    d = os.environ.get("MEMORY_DIR")
+    if not d:
+        die("MEMORY_DIR is not set. It must name this machine's memory "
+            "directory, e.g. export MEMORY_DIR=~/memory")
+    d = os.path.expanduser(d)
+    os.makedirs(d, exist_ok=True)
+    for name in ("LOG.txt", "TREE.txt"):
+        p = os.path.join(d, name)
+        if not os.path.exists(p):
+            open(p, "a").close()
+    return d
+
+
+def config(d):
+    global ENTRY_CHARS, WAKE_LINES
+    p = os.path.join(d, "config")
+    if not os.path.exists(p):
+        with open(p, "w") as f:
+            f.write("ENTRY_CHARS=%d\nWAKE_LINES=%d\n" % (ENTRY_CHARS, WAKE_LINES))
+        return
+    for line in open(p):
+        line = line.split("#")[0].strip()
+        if "=" not in line:
+            continue
+        k, v = (s.strip() for s in line.split("=", 1))
+        if k == "ENTRY_CHARS":
+            ENTRY_CHARS = int(v)
+        elif k == "WAKE_LINES":
+            WAKE_LINES = int(v)
+
+
+def read_log(d):
+    """[(id, date, text)] in order."""
+    out = []
+    for line in open(os.path.join(d, "LOG.txt")):
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        head, _, text = line.partition(" ")
+        date, _, text = text.partition(" ")
+        out.append((int(head[1:]), date, text))
+    return out
+
+
+def read_tree(d):
+    """{(lo,hi): text}"""
+    out = {}
+    for line in open(os.path.join(d, "TREE.txt")):
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        head, _, text = line.partition(" ")
+        lo, _, hi = head.partition("-")
+        out[(int(lo), int(hi))] = text
+    return out
+
+
+def rewrite_tree(d, keep):
+    """Replace TREE.txt. Legal only because TREE.txt is a CACHE of a pure
+    function of LOG.txt -- the log itself is never rewritten by anything."""
+    lock = open(os.path.join(d, ".lock"), "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        tmp = os.path.join(d, "TREE.txt.new")
+        with open(tmp, "w") as f:
+            for (lo, hi), text in keep:
+                f.write("%d-%d %s\n" % (lo, hi, text))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, os.path.join(d, "TREE.txt"))
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def append(d, name, lines):
+    """Append under an exclusive lock. The only way anything is ever written."""
+    lock = open(os.path.join(d, ".lock"), "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        with open(os.path.join(d, name), "a") as f:
+            for line in lines:
+                f.write(line + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def die(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def check(text):
+    text = text.strip()
+    if not text:
+        die("REJECTED: empty.")
+    if "\n" in text or "\r" in text:
+        die("REJECTED: %d lines. A memory is exactly one line." %
+            (text.count("\n") + 1))
+    if len(text) > ENTRY_CHARS:
+        die("REJECTED: %d chars, %d over the %d limit. Compress it further."
+            % (len(text), len(text) - ENTRY_CHARS, ENTRY_CHARS))
+    return text
+
+
+# ---------------------------------------------------------------- naps
+
+def pending(log, tree):
+    """Blocks that can be built and have not been. Smallest first, so a
+    block's two halves are always available before the block itself."""
+    return [b for b in complete(len(log)) if b not in tree]
+
+
+def nap_prompt(d, log, tree, todo):
+    lo, hi = todo[0]
+    if hi - lo <= RAW_MAX:
+        body = "\n".join("  #%d %s %s" % log[i] for i in range(lo, hi))
+        what = "these %d memories" % (hi - lo)
+    else:
+        mid = (lo + hi) // 2
+        body = "\n".join("  %s" % tree[(a, b)] for a, b in
+                         ((lo, mid), (mid, hi)))
+        what = "these two summaries"
+    return (
+        "You are dreaming. Compress {what} into ONE line of at most {n} "
+        "characters.\nKeep every name, number, date and decision. Drop wording, "
+        "not facts.\nInvent nothing. Write it as a memory, not as a description "
+        "of memories.\n\n{body}\n\nThen run exactly:\n"
+        "  memo sleep {lo}-{hi} \"<your line>\"\n\n"
+        "{left} nap(s) left after this one."
+    ).format(what=what, n=ENTRY_CHARS, body=body, lo=lo, hi=hi,
+             left=len(todo) - 1)
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_wake(d, args):
+    log, tree = read_log(d), read_tree(d)
+    todo = pending(log, tree)
+    if todo:
+        print("YOU CANNOT WAKE UP YET: %d compression(s) are pending, and a "
+              "memory\nwith work left in it is not yet the truth. Sleep first "
+              "-- it is quick.\n" % len(todo))
+        print(nap_prompt(d, log, tree, todo))
+        sys.exit(1)
+    if not log:
+        print("You have no memories yet. This is your first moment.\n"
+              "Record what matters with: memo note \"...\"")
+        return
+    for lo, hi in cover(len(log), WAKE_LINES):
+        if hi - lo == 1:
+            print("#%d %s %s" % log[lo])
+        else:
+            print("#%d-%d %s" % (lo, hi - 1, tree[(lo, hi)]))
+
+
+def cmd_note(d, args):
+    if len(args) != 1:
+        die("usage: memo note \"<one line, at most %d chars>\"" % ENTRY_CHARS)
+    text = check(args[0])
+    log = read_log(d)
+    date = datetime.date.today().isoformat()
+    append(d, "LOG.txt", ["#%d %s %s" % (len(log), date, text)])
+    print("ok, memory #%d." % len(log))
+    log, tree = read_log(d), read_tree(d)
+    todo = pending(log, tree)
+    if todo:
+        print("\n" + nap_prompt(d, log, tree, todo))
+
+
+def cmd_sleep(d, args):
+    log, tree = read_log(d), read_tree(d)
+    if args:
+        if len(args) != 2:
+            die("usage: memo sleep <lo>-<hi> \"<one line>\"")
+        m = re.fullmatch(r"(\d+)-(\d+)", args[0])
+        if not m:
+            die("REJECTED: '%s' is not a block id. Copy it from the prompt."
+                % args[0])
+        block = (int(m.group(1)), int(m.group(2)))
+        if block in tree:
+            print("Already dreamt; another session got there first. Skipping.")
+        elif block not in pending(log, tree):
+            die("REJECTED: block %d-%d is not ready to be compressed. Run "
+                "`memo sleep` for the block you should be working on."
+                % block)
+        else:
+            text = check(args[1])
+            append(d, "TREE.txt", ["%d-%d %s" % (block[0], block[1], text)])
+            print("ok, %d-%d remembered." % block)
+        log, tree = read_log(d), read_tree(d)
+    todo = pending(log, tree)
+    if not todo:
+        print("You woke up. Nothing left to compress.")
+        return
+    print("\n" + nap_prompt(d, log, tree, todo))
+
+
+def cmd_forget(d, args):
+    """A summary can be wrong -- mistyped, or a bad compression. Drop it and
+    everything built on top of it; the next sleep computes them again. The log
+    is untouched, so nothing is ever actually lost."""
+    if len(args) != 1:
+        die("usage: memo forget <lo>-<hi>")
+    m = re.fullmatch(r"(\d+)-(\d+)", args[0])
+    if not m:
+        die("REJECTED: '%s' is not a block id." % args[0])
+    lo, hi = int(m.group(1)), int(m.group(2))
+    tree = read_tree(d)
+    doomed = [b for b in tree if b[0] <= lo and hi <= b[1]]
+    if not doomed:
+        die("There is no summary covering %d-%d to forget." % (lo, hi))
+    rewrite_tree(d, [(b, t) for b, t in sorted(tree.items()) if b not in doomed])
+    print("forgot %s. They will be compressed again on your next sleep."
+          % " ".join("%d-%d" % b for b in sorted(doomed)))
+
+
+def cmd_recall(d, args):
+    if len(args) != 1:
+        die("usage: memo recall <regex>")
+    try:
+        pat = re.compile(args[0], re.I)
+    except re.error as e:
+        die("bad regex: %s" % e)
+    hits = [e for e in read_log(d) if pat.search(e[2])]
+    if not hits:
+        print("Nothing in your memory matches that.")
+        return
+    for e in hits:
+        print("#%d %s %s" % e)
+    print("\n%d memories matched." % len(hits))
+
+
+def cmd_import(d, args):
+    """Bulk-append historical memories: 'YYYY-MM-DD <text>' per line.
+    For bootstrapping an identity from older records. Used once."""
+    if len(args) != 1:
+        die("usage: memo import <file>   # lines of 'YYYY-MM-DD <text>'")
+    log = read_log(d)
+    n = len(log)
+    last = log[-1][1] if log else "0000-00-00"
+    out = []
+    for i, line in enumerate(open(args[0]), 1):
+        line = line.rstrip("\n")
+        if not line.strip():
+            continue
+        date, _, text = line.partition(" ")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            die("line %d: expected 'YYYY-MM-DD <text>', got: %s" % (i, line))
+        if date < last:
+            die("line %d: date %s is older than the previous memory (%s). "
+                "Memories must be in order." % (i, date, last))
+        text = text.strip()
+        if not text or len(text) > ENTRY_CHARS:
+            die("line %d: %d chars (limit %d)." % (i, len(text), ENTRY_CHARS))
+        out.append("#%d %s %s" % (n + len(out), date, text))
+        last = date
+    append(d, "LOG.txt", out)
+    print("imported %d memories (#%d..#%d)." % (len(out), n, n + len(out) - 1))
+    todo = pending(read_log(d), read_tree(d))
+    if todo:
+        print("%d compressions are now pending. Run `memo sleep` until it "
+              "says you woke up." % len(todo))
+
+
+COMMANDS = {"wake": cmd_wake, "note": cmd_note, "sleep": cmd_sleep,
+            "recall": cmd_recall, "forget": cmd_forget, "import": cmd_import}
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
+        print(__doc__.strip())
+        sys.exit(0 if len(sys.argv) < 2 else 1)
+    d = store()
+    config(d)
+    COMMANDS[sys.argv[1]](d, sys.argv[2:])
+
+
+if __name__ == "__main__":
+    main()
