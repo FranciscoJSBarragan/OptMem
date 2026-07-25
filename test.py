@@ -167,6 +167,7 @@ check(r.returncode == 1 and "Cannot wake" in r.stdout,
       "wake must refuse while work is pending")
 check("run memo wake again" in r.stdout,
       "the refusal must order the agent back to wake")
+check("None" not in r.stdout, "the refusal printed a Python None")
 
 # sleep loop, with a fake compressor
 naps = 0
@@ -229,10 +230,17 @@ r = run("sleep", "0-1", "attempted overwrite")
 check(r.returncode == 0 and "Nothing left to compress" in r.stdout,
       "sleep with nothing pending must say so and write nothing")
 
-# recall reaches memories the summaries lost
+# recall reaches memories the summaries lost, and matches the whole line:
+# id and date included, not just the text
 r = run("recall", "memory number 7,")
 check(r.returncode == 0 and "#7 " in r.stdout, "recall missed a memory")
 check("1 match." in r.stdout, "a single match is not `1 matches`: " + r.stdout)
+r = run("recall", "^#7 ")
+check("memory number 7," in r.stdout, "recall cannot find a memory by id")
+r = run("recall", "2020-01-02")
+check("#7 " in r.stdout and "5 matches." in r.stdout,
+      "recall cannot find memories by date: " + r.stdout)
+
 
 def treesize():
     t = os.path.join(d, "TREE")
@@ -244,11 +252,18 @@ check("16-31" in r.stdout, "forget did not report the block: " + r.stdout + r.st
 check(treesize() < before, "forget did not shrink the tree")
 check(os.path.getsize(os.path.join(d, "LOG.txt")) == logsize, "forget touched the log")
 check(run("wake").returncode == 1, "wake should refuse after a forget")
-# a block already settled cannot be rewritten: only the first pending block
-# is ever accepted
+# a settled block cannot be rewritten. Resubmitting one (two sessions paid
+# the same nap) is not an error: say it is settled, write nothing
+mid = treesize()
 r = run("sleep", "0-1", "attempted overwrite")
+check(r.returncode == 0 and "already settled" in r.stdout,
+      "resubmitting a settled block was not reported as settled: " + r.stderr)
+check(treesize() == mid, "resubmitting a settled block wrote something")
+# a block that is neither settled nor next (here: a dropped ancestor,
+# submitted before its half is rebuilt) is a real mistake
+r = run("sleep", "0-31", "out of order")
 check(r.returncode == 1 and "Wrong block" in r.stderr,
-      "rewriting a settled block was allowed")
+      "an out-of-order block was accepted")
 n = 0
 while True:
     r = run("sleep")

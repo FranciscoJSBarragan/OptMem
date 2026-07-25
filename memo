@@ -343,11 +343,12 @@ def cmd_wake(d, args):
                     % (T, plural(now, "entry")))
     # A part is rendered as of T, so a note landing between two parts cannot
     # shift a boundary and drop a line.
-    n = pending_count(d, T)
-    if n:
+    nap = next_nap(d, T)
+    if nap:
+        n = max(1, pending_count(d, T))
         print("Cannot wake: %s pending. Do %s, then run memo wake again.\n"
               % (plural(n, "compression"), "it" if n == 1 else "them"))
-        print(next_nap(d, T))
+        print(nap)
         sys.exit(1)
     if not T:
         print("No memories yet. Record the first with: memo note \"<one line>\"")
@@ -403,11 +404,14 @@ def cmd_sleep(d, args):
             print("Nothing left to compress.")
             return
         if (lo, hi) != todo[0]:
-            die("Wrong block: %s. Blocks are built in order; the next is "
-                "%d-%d. Run: memo sleep"
-                % (args[0], todo[0][0], todo[0][1] - 1))
-        if not tree_put(d, lo, hi, check(args[1])):
-            print("Another session already wrote %d-%d." % (lo, hi - 1))
+            if tree_get(d, lo, hi) is not None:
+                print("%d-%d is already settled." % (lo, hi - 1))
+            else:
+                die("Wrong block: %s. Blocks are built in order; the next is "
+                    "%d-%d. Run: memo sleep"
+                    % (args[0], todo[0][0], todo[0][1] - 1))
+        elif not tree_put(d, lo, hi, check(args[1])):
+            print("%d-%d was settled or forgotten meanwhile." % (lo, hi - 1))
         else:
             print("%d-%d saved." % (lo, hi - 1))
     nap = next_nap(d, T)
@@ -445,7 +449,8 @@ def cmd_recall(d, args):
         pat = re.compile(args[0], re.I)
     except re.error as e:
         die("bad regex: %s" % e)
-    hits = [e for e in log_slice(d, 0, log_len(d)) if pat.search(e[2])]
+    hits = [e for e in log_slice(d, 0, log_len(d))
+            if pat.search("#%d %s %s" % e)]
     if not hits:
         print("No match.")
         return
