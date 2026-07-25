@@ -339,7 +339,9 @@ def cmd_wake(d, args):
     print("\n".join(parts[k - 1]))
     if k < len(parts):
         print("next: memo wake %d %d" % (k + 1, T))
-    elif len(parts) > 1:
+    else:
+        # always, even for a one-part memory: the contract an agent is given
+        # is "run parts until one says awake", so it must always arrive
         print("awake.")
 
 

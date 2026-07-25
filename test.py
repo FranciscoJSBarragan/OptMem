@@ -250,6 +250,12 @@ r = subprocess.run(memo + ["recall", "right after a torn write"], env=env2,
                    capture_output=True, text=True)
 check("#%d " % P in r.stdout, "the memory after a torn write reads wrong")
 
+# a memory small enough to fit one part must still end with the terminator
+# the agent was told to wait for
+r = subprocess.run(memo + ["wake"], env=env2, capture_output=True, text=True)
+check(r.stdout.rstrip().endswith("awake."),
+      "a one-part wake never says `awake.`:\n" + r.stdout)
+
 shutil.rmtree(d2)
 shutil.rmtree(d)
 print("\n%d passed, %d failed" % (ok, fail))
