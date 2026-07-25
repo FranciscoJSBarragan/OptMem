@@ -135,7 +135,10 @@ r = run("note", "two\nlines")
 check(r.returncode == 1 and "one line" in r.stderr, "multi-line note accepted")
 r = run("note", "   ")
 check(r.returncode == 1, "empty note accepted")
-check("No memories yet" in run("wake").stdout, "empty wake should say so")
+r = run("wake")
+check("No memories yet" in r.stdout, "empty wake should say so")
+check(r.stdout.rstrip().endswith("You are awake."),
+      "an empty wake must still end with `You are awake.`")
 
 with open(os.path.join(d, "seed.txt"), "w") as f:
     day = datetime.date(2020, 1, 1)
@@ -148,11 +151,14 @@ check("imported %d" % N in r.stdout, "import failed: " + r.stdout + r.stderr)
 r = run("wake")
 check(r.returncode == 1 and "Cannot wake" in r.stdout,
       "wake must refuse while work is pending")
+check("run memo wake again" in r.stdout,
+      "the refusal must order the agent back to wake")
 
 # sleep loop, with a fake compressor
 naps = 0
 r = run("sleep")
-while "You are awake" not in r.stdout:
+check("Compress memories #" in r.stdout, "nap prompt must name its object")
+while "Nothing left to compress" not in r.stdout:
     line = offered(r.stdout)
     check(bool(line), "no command offered:\n" + r.stdout + r.stderr)
     if not line:
@@ -160,12 +166,12 @@ while "You are awake" not in r.stdout:
     check(line[0].startswith("Run: "), "a command was offered as a label, not "
           "an order: %r" % line[0])
     bid = nap_id(r.stdout)
-    body = [l.strip() for l in r.stdout.splitlines()
-            if l.startswith("  #") or (l.startswith("  ") and l.strip()
-                                       and not l.strip().startswith("memo"))]
+    body = [l.strip() for l in r.stdout.splitlines() if l.startswith("  #")]
     r = run("sleep", bid, (" ".join(body)[:280]).strip() or "empty")
     check(r.returncode == 0, "sleep rejected a valid nap: " + r.stderr)
     naps += 1
+check("You are awake" not in r.stdout,
+      "sleep must never claim the agent is awake; only wake may")
 check(naps == len(complete(N)), "did %d naps, expected %d" % (naps, len(complete(N))))
 
 r = run("wake")
@@ -204,9 +210,10 @@ for f in os.listdir(os.path.join(d, "TREE")):
     check(os.path.getsize(os.path.join(d, "TREE", f)) % 288 == 0,
           "TREE/%s is not a whole number of records" % f)
 
-# a block already written cannot be rewritten
-check(run("sleep", "0-2", "attempted overwrite").returncode == 1,
-      "rewriting a settled block was allowed")
+# a sleep when nothing is pending writes nothing and says so
+r = run("sleep", "0-1", "attempted overwrite")
+check(r.returncode == 0 and "Nothing left to compress" in r.stdout,
+      "sleep with nothing pending must say so and write nothing")
 
 # recall reaches memories the summaries lost
 r = run("recall", "memory number 7,")
@@ -217,15 +224,20 @@ def treesize():
     return sum(os.path.getsize(os.path.join(t, f)) for f in os.listdir(t))
 
 before, logsize = treesize(), os.path.getsize(os.path.join(d, "LOG.txt"))
-r = run("forget", "16-32")
-check("16-32" in r.stdout, "forget did not report the block: " + r.stdout + r.stderr)
+r = run("forget", "16-31")
+check("16-31" in r.stdout, "forget did not report the block: " + r.stdout + r.stderr)
 check(treesize() < before, "forget did not shrink the tree")
 check(os.path.getsize(os.path.join(d, "LOG.txt")) == logsize, "forget touched the log")
 check(run("wake").returncode == 1, "wake should refuse after a forget")
+# a block already settled cannot be rewritten: only the first pending block
+# is ever accepted
+r = run("sleep", "0-1", "attempted overwrite")
+check(r.returncode == 1 and "Wrong block" in r.stderr,
+      "rewriting a settled block was allowed")
 n = 0
 while True:
     r = run("sleep")
-    if "You are awake" in r.stdout:
+    if "Nothing left to compress" in r.stdout:
         break
     bid = nap_id(r.stdout)
     check(run("sleep", bid, "rebuilt after forget").returncode == 0, "rebuild rejected")
@@ -233,8 +245,8 @@ while True:
 check(n > 0, "forget created no work")
 check(run("wake").returncode == 0, "wake still refuses after rebuilding")
 check(treesize() == before, "tree did not return to its original size")
-check(run("forget", "17-33").returncode == 1, "forgetting a non-block should fail")
-check(run("forget", "999998-1000000").returncode == 1, "forgetting a missing block should fail")
+check(run("forget", "17-32").returncode == 1, "forgetting a non-block should fail")
+check(run("forget", "1048576-1048577").returncode == 1, "forgetting a missing block should fail")
 
 # UTF-8: multi-byte characters must not shift record boundaries or dodge limits
 run("note", "reunião com João em São Paulo: ação aprovada, coração tranquilo")
@@ -250,7 +262,7 @@ check(r.returncode == 1 and "300 bytes" in r.stderr,
 # note landed -> its blocks are pending; settle before the final wake check
 while True:
     r = run("sleep")
-    if "You are awake" in r.stdout:
+    if "Nothing left to compress" in r.stdout:
         break
     bid = nap_id(r.stdout)
     run("sleep", bid, "settled")
@@ -297,7 +309,7 @@ r = run("note", "the memory right after a torn write", store=d2)
 check(r.returncode == 0, "note failed after a torn write: " + r.stderr)
 sz = os.path.getsize(os.path.join(d2, "LOG.txt"))
 check(sz % 320 == 0, "LOG.txt left misaligned after a torn write: %d" % sz)
-check("saved as #%d" % P in r.stdout, "torn record was counted as a memory")
+check("Saved as #%d" % P in r.stdout, "torn record was counted as a memory")
 r = run("recall", "right after a torn write", store=d2)
 check("#%d " % P in r.stdout, "the memory after a torn write reads wrong")
 
@@ -305,7 +317,7 @@ check("#%d " % P in r.stdout, "the memory after a torn write reads wrong")
 # the agent was told to wait for
 while True:
     r = run("sleep", store=d2)
-    if "You are awake" in r.stdout:
+    if "Nothing left to compress" in r.stdout:
         break
     bid = nap_id(r.stdout)
     run("sleep", bid, "settled", store=d2)

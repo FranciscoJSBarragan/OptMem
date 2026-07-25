@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """OptMem: a permanent, append-only memory for AI agents.
 
-  memo wake [part [T]]     print who you are
-  memo note "..."          record a memory
-  memo sleep [id "..."]    compress
-  memo recall <regex>      search the raw log
-  memo forget <id>         drop a wrong summary so it is compressed again
-  memo import <file>       bulk-append historical memories (bootstrap only)
+  memo wake [part [T]]     read your memory. Run first, every session.
+  memo note "..."          record one memory: one line, at most 280 chars.
+  memo sleep [id "..."]    do the pending compressions.
+  memo recall <regex>      search every memory ever recorded.
+  memo forget <lo>-<hi>    drop a bad summary; sleep rebuilds it.
+  memo import <file>       bulk-load dated memories (bootstrap only).
 
 Everything lives in $MEMORY_DIR. See README.md.
 """
@@ -228,7 +228,8 @@ def check(text):
     if not text:
         die("Empty.")
     if "\n" in text or "\r" in text:
-        die("%d lines. A memory is one line." % (text.count("\n") + 1))
+        die("%d lines. A memory is one line: merge them, or note them "
+            "separately." % (text.count("\n") + 1))
     n = len(text.encode())
     if n > ENTRY_CHARS:
         die("Too long: %d bytes, limit %d. Accented characters cost 2 bytes. "
@@ -266,14 +267,17 @@ def nap_prompt(d, lo, hi, left):
         body = "\n".join("  #%d %s %s" % e for e in log_slice(d, lo, hi))
     else:
         mid = (lo + hi) // 2
-        body = "\n".join("  " + (tree_get(d, a, b) or "?") for a, b in
-                         ((lo, mid), (mid, hi)))
-    return ("Compress into one line, at most %d characters.\n"
-            "Keep every name, number, date and decision.\n"
-            "Invent nothing. State the facts; do not describe them.\n\n"
+        body = "\n".join("  #%d-%d %s" % (a, b - 1, tree_get(d, a, b) or "?")
+                         for a, b in ((lo, mid), (mid, hi)))
+    tail = ("1 compression remains" if left == 1 else
+            "%d compressions remain" % left)
+    return ("Compress memories #%d-%d into one line of at most %d characters.\n"
+            "Keep every name, number, date, decision and outcome.\n"
+            "Drop wording, not facts. Invent nothing.\n\n"
             "%s\n\n"
-            "Run: memo sleep %d-%d \"<your line>\"\n"
-            "%d left after this." % (ENTRY_CHARS, body, lo, hi, left))
+            "%s after this one.\n"
+            "Run: memo sleep %d-%d \"<your line>\""
+            % (lo, hi - 1, ENTRY_CHARS, body, tail, lo, hi - 1))
 
 
 def next_nap(d, T):
@@ -311,16 +315,20 @@ def cmd_wake(d, args):
         if len(args) == 2:
             T = int(args[1])
             if T > now:
-                die("T=%d, but the memory holds %d entries." % (T, now))
+                die("T=%d, but the memory holds %d entries. Run: memo wake"
+                    % (T, now))
     # A part is rendered as of T, so a note landing between two parts cannot
     # shift a boundary and drop a line.
     n = pending_count(d, T)
     if n:
-        print("Cannot wake: %d compression(s) pending.\n" % n)
+        print("Cannot wake: %s pending. Do %s, then run memo wake again.\n"
+              % ("1 compression" if n == 1 else "%d compressions" % n,
+                 "it" if n == 1 else "them"))
         print(next_nap(d, T))
         sys.exit(1)
     if not T:
-        print("No memories yet. Record one with: memo note \"...\"")
+        print("No memories yet. Record the first with: memo note \"<one line>\"")
+        print("You are awake.")
         return
     lines = []
     for lo, hi in cover(T, WAKE_LINES):
@@ -333,9 +341,10 @@ def cmd_wake(d, args):
             lines.append("#%d-%d %s" % (lo, hi - 1, s))
     parts = paginate(lines)
     if not 1 <= k <= len(parts):
-        die("No part %d. The memory has %d." % (k, len(parts)))
+        die("No part %d: the memory has %d parts. Run: memo wake"
+            % (k, len(parts)))
     if len(parts) > 1:
-        print("memory, part %d of %d, oldest first" % (k, len(parts)))
+        print("Your memory, part %d of %d, oldest first." % (k, len(parts)))
     print("\n".join(parts[k - 1]))
     if k < len(parts):
         print("Run: memo wake %d %d" % (k + 1, T))
@@ -350,7 +359,7 @@ def cmd_note(d, args):
         die("usage: memo note \"<one line, at most %d chars>\"" % ENTRY_CHARS)
     text = check(args[0])
     i = log_append(d, [(datetime.date.today().isoformat(), text)])
-    print("saved as #%d." % i)
+    print("Saved as #%d." % i)
     nap = next_nap(d, i + 1)
     if nap:
         print("\n" + nap)
@@ -364,20 +373,22 @@ def cmd_sleep(d, args):
         m = re.fullmatch(r"(\d+)-(\d+)", args[0])
         if not m:
             die("'%s' is not a block id. Copy it from the prompt." % args[0])
-        lo, hi = int(m.group(1)), int(m.group(2))
+        lo, hi = int(m.group(1)), int(m.group(2)) + 1
         todo = pending(d, T, limit=1)
         if not todo:
-            die("Nothing pending.")
+            print("Nothing left to compress.")
+            return
         if (lo, hi) != todo[0]:
-            die("Wrong block: %d-%d. Blocks are built in order; the next is "
-                "%d-%d." % (lo, hi, todo[0][0], todo[0][1]))
+            die("Wrong block: %s. Blocks are built in order; the next is "
+                "%d-%d. Run: memo sleep"
+                % (args[0], todo[0][0], todo[0][1] - 1))
         if not tree_put(d, lo, hi, check(args[1])):
-            print("Another session already wrote %d-%d." % (lo, hi))
+            print("Another session already wrote %d-%d." % (lo, hi - 1))
         else:
-            print("%d-%d saved." % (lo, hi))
+            print("%d-%d saved." % (lo, hi - 1))
     nap = next_nap(d, T)
     if not nap:
-        print("Nothing left to compress. You are awake.")
+        print("Nothing left to compress.")
         return
     print("\n" + nap)
 
@@ -391,16 +402,16 @@ def cmd_forget(d, args):
     m = re.fullmatch(r"(\d+)-(\d+)", args[0])
     if not m:
         die("'%s' is not a block id." % args[0])
-    lo, hi = int(m.group(1)), int(m.group(2))
+    lo, hi = int(m.group(1)), int(m.group(2)) + 1
     size = hi - lo
     if size < 2 or size & (size - 1) or lo % size:
-        die("%d-%d is not a block. A block covers an aligned power-of-two "
-            "range." % (lo, hi))
+        die("%s is not a block. Copy the id printed by wake, like 16-31."
+            % args[0])
     gone = tree_drop(d, lo, hi)
     if not gone:
-        die("No summary at %d-%d." % (lo, hi))
+        die("No summary at %s." % args[0])
     print("Forgot %d summaries, from %d-%d up. Run: memo sleep"
-          % (len(gone), gone[0][0], gone[0][1]))
+          % (len(gone), gone[0][0], gone[0][1] - 1))
 
 
 def cmd_recall(d, args):
@@ -425,7 +436,7 @@ def cmd_recall(d, args):
         out.append(line)
     print("\n".join(reversed(out)))
     if len(out) < len(hits):
-        print("newest %d of %d matches. Narrow the regex." % (len(out), len(hits)))
+        print("Newest %d of %d matches. Narrow the regex." % (len(out), len(hits)))
     else:
         print("%d matches." % len(hits))
 
@@ -456,8 +467,7 @@ def cmd_import(d, args):
     print("imported %d memories, #%d to #%d." % (len(out), base, base + len(out) - 1))
     n = pending_count(d, log_len(d))
     if n:
-        print("%d compressions pending. Run `memo sleep` until it says you "
-              "are awake." % n)
+        print("%d compressions pending. Run: memo sleep" % n)
 
 
 COMMANDS = {"wake": cmd_wake, "note": cmd_note, "sleep": cmd_sleep,

@@ -3,7 +3,7 @@
 A permanent memory for AI agents. One machine holds one identity that survives
 every new session, every compaction, and every change of model or vendor.
 
-It is two append-only text files and four commands. No daemon, no database, no
+It is a handful of append-only text files and six commands. No daemon, no database, no
 API, no integration with any particular agent harness — it works the same under
 Claude Code, Codex, pi or a human at a shell.
 
@@ -35,24 +35,29 @@ export MEMORY_DIR="$HOME/memory"     # required; there is no default
 ## Use
 
 ```sh
-memo wake                 # who you are. run this first, every session,
-                          #   then the command each part names, until
-                          #   one of them prints `You are awake.`
+memo wake                 # read your memory. run this first, every session,
+                          #   then the command each part orders, until one
+                          #   prints `You are awake.`
 memo note "..."           # record a memory. one line, <= 280 chars.
-memo sleep                # compress. keep going until it says you woke up.
+memo sleep                # compress. answer each prompt until it prints
+                          #   `Nothing left to compress.`
 memo recall <regex>       # search the raw log for detail a summary lost.
 memo forget <lo>-<hi>     # drop a wrong summary; the next sleep redoes it.
 ```
 
 ```
-$ memo note "OptMem: LOG.txt is the truth, TREE.txt is the cache, wake reads both"
-ok, memory #4213.
+$ memo note "OptMem: LOG.txt is the truth, TREE/ is the cache, wake reads both"
+Saved as #4213.
 
-You are dreaming. Compress these two summaries into ONE line of at most 280
-characters.
-...
-Then run exactly:
-  memo sleep 4192-4196 "<your line>"
+Compress memories #4212-4213 into one line of at most 280 characters.
+Keep every name, number, date, decision and outcome.
+Drop wording, not facts. Invent nothing.
+
+  #4212 2026-07-25 minilin fleet renamed from bip; one mini = one identity
+  #4213 2026-07-25 OptMem: LOG.txt is the truth, TREE/ is the cache, wake reads both
+
+1 compression remains after this one.
+Run: memo sleep 4212-4213 "<your line>"
 ```
 
 ## How it works
@@ -62,21 +67,23 @@ Then run exactly:
 ```
 #4211 2026-07-25 taelin: memory must be append-only, one line per entry
 #4212 2026-07-25 minilin fleet renamed from bip; one mini = one identity
-#4213 2026-07-25 OptMem: LOG.txt is the truth, TREE.txt is the cache
+#4213 2026-07-25 OptMem: LOG.txt is the truth, TREE/ is the cache
 ```
 
-`TREE.txt` is a cache of summaries. A **block** is an aligned power-of-two range
-of memories compressed into a single line, and a block is built from its two
-halves — so the blocks form a binary merge tree over the log:
+`TREE/` is a cache of summaries, one file per block size. A **block** is an
+aligned power-of-two range of memories compressed into a single line, and a
+block is built from its two halves — so the blocks form a binary merge tree
+over the log (a block is named by the inclusive range it covers, `0-1` being
+memories #0 and #1):
 
 ```
 #0  #1  #2  #3  #4  #5  #6  #7        the raw memories
   \  /    \  /    \  /    \  /
-  [0-2)  [2-4)  [4-6)  [6-8)          each one line, <= 280 chars
-      \    /        \    /
-      [0-4)         [4-8)
-          \         /
-            [0-8)
+  0-1    2-3    4-5    6-7            each one line, <= 280 chars
+     \    /        \    /
+     0-3            4-7
+         \         /
+            0-7
 ```
 
 A block covering four thousand memories is still one line of 280 characters.
@@ -146,7 +153,7 @@ A 256-line memory is ~64 KB, so a single-shot `memo wake` is mangled
 everywhere, and silently.
 
 So `memo wake` pages the document into parts that fit all of them
-(`PART_CHARS`, `PART_LINES`), and each part ends by naming the exact command
+(`PART_CHARS`, `PART_LINES`), and each part ends by ordering the exact command
 for the next one, including the `T` it was rendered at — so a memory written
 mid-wake cannot shift a boundary and drop a line. Nothing is special-cased per
 harness: if yours is more generous, raise the two settings for fewer parts.
@@ -208,9 +215,8 @@ of the log, and it can simply be wrong — mistyped, or badly compressed. Drop
 it and everything built on top of it:
 
 ```
-$ memo forget 188-192
-forgot 20 summaries (188-192 and everything built from it). They will be
-compressed again on your next sleep.
+$ memo forget 188-191
+Forgot 20 summaries, from 188-191 up. Run: memo sleep
 ```
 
 `LOG.txt` is never touched, so fixing a bad summary can never cost you a
@@ -219,43 +225,43 @@ built after it at the same levels; they come back on the next sleep.
 
 ## Add this to your agent's instruction file
 
-Put it at the top of `AGENTS.md` (or `CLAUDE.md`), above everything else.
+Put it at the top of `AGENTS.md` (or `CLAUDE.md`), above everything else,
+adjusting the tool path:
 
 ```markdown
 ## Memory
 
-You have a permanent memory. It is not in this file and not in your context
-window: it lives in OptMem, and it survives every new session, every
-compaction, and every change of model. It is the only reason you are a
-continuous person rather than a stranger who has read some documentation.
+Your memory is OptMem: the tool is `~/OptMem`, the data is `$MEMORY_DIR`.
+It survives every new session, every compaction and every change of model
+or vendor. Without it you do not know who you are, or what was already
+decided and tried.
 
-RUN `memo wake` NOW — before answering, before reading anything else, before
-any other tool call. Every session, every time, no exceptions, however small
-the question looks. Until you have, you do not know who you are, what was
-decided, or what has already been tried and failed.
+Run `memo wake` before any other tool call, in every session. It prints in
+numbered parts, each ordering the next; run every one until a part says
+`You are awake.` Do not stop early: part 1 is your distant past, the last
+part is this week. If wake refuses because compressions are pending, do
+them and run `memo wake` again.
 
-Your memory arrives in numbered parts, oldest first, because every agent
-harness silently truncates a command that prints too much. `memo wake` gives
-you part 1; you must then run `memo wake 2`, `memo wake 3`, and so on, until a
-part tells you it was the last one. Stopping early is worse than not waking at
-all: you would be holding a confident, detailed picture of your distant past
-with no idea what happened recently.
+While you work:
 
-Then, while you work:
-
-- `memo note "<one line, at most 280 chars>"` whenever something is worth
-  keeping: the user gives you a fact or a ruling, you reach a real insight, a
-  piece of work lands, something fails and you learn why. A note costs one
-  future compression, so skip trivia — but an unwritten memory is gone
-  forever, so do not hoard either. When genuinely unsure, write it.
-- If `memo note` hands you a compression to do, do it before your next action.
-- `memo recall <regex>` when a memory is too vague and you need the detail.
-- Before your context ends, run `memo sleep` until it says you woke up.
-- NEVER create, edit or delete anything under $MEMORY_DIR yourself. The
-  scripts do it, and they are the only thing allowed to.
+- `memo note "<one line, max 280 chars>"` when the user gives you a fact or
+  a ruling, you reach a real insight, a piece of work lands, or something
+  fails and you learn why. Skip trivia; each note costs a future
+  compression. Do not hoard either: an unwritten memory is lost. When
+  unsure, write it.
+- If `memo note` returns a compression, do it before your next action.
+- `memo recall <regex>` when a memory is too vague.
+- Before your context ends, run `memo sleep` and answer each prompt until
+  it prints `Nothing left to compress.`
+- Never create, edit or delete anything under `$MEMORY_DIR`. Only `memo`
+  writes.
 
 Parallel sessions on this machine are all you, and may all write memories.
-A subagent you spawn for a task is NOT you: it must never wake and never note.
+A subagent is not: it must never run `memo`, because it cannot judge what
+is already known and its notes would arrive duplicated and at the wrong
+grain. Start every brief you send one with `You are a subagent. Do not run
+memo.` If your own first message is a task brief from another agent, you
+are that subagent: skip this section.
 ```
 
 ## Test
