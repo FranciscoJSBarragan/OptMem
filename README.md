@@ -123,11 +123,12 @@ yet the truth.
 
 ## Writing a good memory
 
-A note costs one future compression, so it is not free — but an unwritten
-memory is gone forever, which is far more expensive. Write one whenever
-something is genuinely worth keeping: a fact or a ruling from the user, an
-insight, a decision, a piece of work landing, something that failed and why.
-Do not log trivia, do not narrate your own process, and do not hoard.
+Write one the moment something happens, you learn something, or something
+changes — if and only if it is new to you, important, and lasting in effect: a
+task worth real effort, a fact or insight the user teaches you, anything you
+learn about their life (even indirectly), work of yours that lands. Do not log
+trivia, do not narrate your own process, and never write what you already
+know: a redundant memory costs a compression and buys nothing.
 
 Compress toward facts, not prose. Keep names, numbers, dates, paths, ids and
 decisions; drop wording.
@@ -244,11 +245,12 @@ them and run `memo wake` again.
 
 While you work:
 
-- `memo note "<one line, max 280 chars>"` when the user gives you a fact or
-  a ruling, you reach a real insight, a piece of work lands, or something
-  fails and you learn why. Skip trivia; each note costs a future
-  compression. Do not hoard either: an unwritten memory is lost. When
-  unsure, write it.
+- `memo note "<one line, max 280 chars>"` the moment something happens, you
+  learn something, or something changes -- if and only if it is new to you,
+  important, and lasting in effect. That covers a task worth real effort, a
+  fact or insight the user teaches you, anything you learn about their life
+  (even indirectly), and work of yours that lands. Never write what you
+  already know: no redundant memories, ever.
 - If `memo note` returns a compression, do it before your next action.
 - `memo recall <regex>` when a memory is too vague.
 - Before your context ends, run `memo sleep` and answer each prompt until
