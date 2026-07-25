@@ -36,7 +36,8 @@ export MEMORY_DIR="$HOME/memory"     # required; there is no default
 
 ```sh
 memo wake                 # who you are. run this first, every session,
-                          #   then `memo wake 2`, `3`... until it says so.
+                          #   then the command each part names, until
+                          #   one of them prints `awake.`
 memo note "..."           # record a memory. one line, <= 280 chars.
 memo sleep                # compress. keep going until it says you woke up.
 memo recall <regex>       # search the raw log for detail a summary lost.
@@ -86,11 +87,11 @@ keeps a block whole when its size is small relative to its age, so **detail is
 proportional to recency**, and it spends exactly `WAKE_LINES` lines doing it:
 
 ```
-10,000 memories, WAKE_LINES = 320:
+10,000 memories, WAKE_LINES = 256:
 
   block size:    1    2    4    8   16   32   64  128  256
-  how many:     70   35   35   35   36   35   35   35    4
-                └ the last 70, verbatim ───────────▶ the first 1,000, 256:1
+  how many:     54   27   27   27   28   27   27   27   12
+                └ the last 54, verbatim ───────────▶ the first 3,000, 256:1
 ```
 
 The oldest memories are recalled as a vague shape, the newest word for word,
@@ -126,21 +127,29 @@ decisions; drop wording.
 
 ```
 bad   worked on the memory system today and made good progress on the design
-good  OptMem design settled: LOG.txt append-only truth, TREE.txt binary merge
-      tree of 280-char summaries, wake renders a fixed 320-line document
+good  OptMem design settled: LOG.txt append-only truth, TREE binary merge
+      tree of 280-char summaries, wake renders a fixed 256-line document
 ```
 
 ## Output is delivered in parts
 
 Every harness truncates an over-long command, and each one drops a different
-piece: Codex cuts at 10 KiB or 256 lines, Claude Code at 30,000 characters,
-pi at 50 KB. A 320-line memory is ~79 KB, so a single-shot `memo wake` gets
-mangled everywhere — and silently.
+piece:
 
-So `memo wake` pages the document into parts that fit the strictest of them
+```
+  Claude Code  30,000 chars          drops the MIDDLE
+  pi           50 KB / 2000 lines    drops the HEAD
+  Codex        10,000 tokens         (configurable per call)
+```
+
+A 256-line memory is ~64 KB, so a single-shot `memo wake` is mangled
+everywhere, and silently.
+
+So `memo wake` pages the document into parts that fit all of them
 (`PART_CHARS`, `PART_LINES`), and each part ends by naming the exact command
-for the next one. Nothing is ever dropped, and no harness is special-cased: if
-yours is more generous, raise the two settings and get fewer parts.
+for the next one, including the `T` it was rendered at — so a memory written
+mid-wake cannot shift a boundary and drop a line. Nothing is special-cased per
+harness: if yours is more generous, raise the two settings for fewer parts.
 
 ## Files
 
@@ -152,9 +161,9 @@ $MEMORY_DIR/
   TREE/8      by position
   ...
   config      ENTRY_CHARS=280   longest a memory may be
-              WAKE_LINES=320    how many lines `memo wake` prints (~24k tokens)
-              PART_CHARS=8000   how much of it fits in one command's output
-              PART_LINES=200    ...and in how many lines
+              WAKE_LINES=256    how many lines `memo wake` prints (~16k tokens)
+              PART_CHARS=20000  how much of it fits in one command's output
+              PART_LINES=500    ...and in how many lines
 ```
 
 **Records are fixed width**: 320 bytes in `LOG.txt`, 288 in the `TREE` files.

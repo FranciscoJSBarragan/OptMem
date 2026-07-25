@@ -16,7 +16,12 @@ sys.path.insert(0, HERE)
 from blocks import complete, cover  # noqa: E402
 
 N = 2000
-WAKE_LINES = 320
+WAKE_LINES = 256
+PART_CHARS = 20000
+# Verified caps of the harnesses in the wild: Claude Code cuts a command's
+# output at 30,000 chars (middle), pi at 50 KB / 2000 lines (head), Codex
+# budgets 10,000 tokens. A part must fit the strictest of each kind.
+CAP_CHARS, CAP_LINES = 30000, 2000
 ok, fail = 0, 0
 
 
@@ -76,12 +81,12 @@ def run(*args):
 
 
 r = run("note", "x" * 281)
-check(r.returncode == 1 and "REJECTED" in r.stderr, "over-long note accepted")
+check(r.returncode == 1 and "Too long" in r.stderr, "over-long note accepted")
 r = run("note", "two\nlines")
-check(r.returncode == 1 and "REJECTED" in r.stderr, "multi-line note accepted")
+check(r.returncode == 1 and "one line" in r.stderr, "multi-line note accepted")
 r = run("note", "   ")
 check(r.returncode == 1, "empty note accepted")
-check("no memories yet" in run("wake").stdout, "empty wake should say so")
+check("No memories yet" in run("wake").stdout, "empty wake should say so")
 
 with open(os.path.join(d, "seed.txt"), "w") as f:
     day = datetime.date(2020, 1, 1)
@@ -92,13 +97,13 @@ r = run("import", os.path.join(d, "seed.txt"))
 check("imported %d" % N in r.stdout, "import failed: " + r.stdout + r.stderr)
 
 r = run("wake")
-check(r.returncode == 1 and "CANNOT WAKE" in r.stdout,
+check(r.returncode == 1 and "Cannot wake" in r.stdout,
       "wake must refuse while work is pending")
 
 # sleep loop, with a fake compressor
 naps = 0
 r = run("sleep")
-while "You woke up" not in r.stdout:
+while "You are awake" not in r.stdout:
     line = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")]
     check(bool(line), "no command offered:\n" + r.stdout + r.stderr)
     if not line:
@@ -108,25 +113,24 @@ while "You woke up" not in r.stdout:
             if l.startswith("  #") or (l.startswith("  ") and l.strip()
                                        and not l.strip().startswith("memo"))]
     r = run("sleep", bid, (" ".join(body)[:280]).strip() or "empty")
-    check("REJECTED" not in r.stderr, "sleep rejected a valid nap: " + r.stderr)
+    check(r.returncode == 0, "sleep rejected a valid nap: " + r.stderr)
     naps += 1
 check(naps == len(complete(N)), "did %d naps, expected %d" % (naps, len(complete(N))))
 
 r = run("wake")
 check(r.returncode == 0, "wake still refuses after a full sleep")
 
-# the document survives pagination, and every part fits the strictest harness
-# output cap in the wild (Codex: 10 KiB or 256 lines)
+# the document survives pagination, and every part fits every harness's cap
 parts, k = [], 1
 while True:
     r = run("wake", str(k))
     if r.returncode != 0:
         break
-    body = [l for l in r.stdout.splitlines()
-            if not l.startswith("---") and not l.startswith("    ")]
-    check(len(r.stdout) < 10240, "part %d is %d bytes, over Codex's 10 KiB cap"
-          % (k, len(r.stdout)))
-    check(len(r.stdout.splitlines()) < 256, "part %d is over Codex's 256-line cap" % k)
+    body = [l for l in r.stdout.splitlines() if l.startswith("#")]
+    check(len(r.stdout) < CAP_CHARS, "part %d is %d chars, over the %d cap"
+          % (k, len(r.stdout), CAP_CHARS))
+    check(len(r.stdout.splitlines()) < CAP_LINES, "part %d is over %d lines"
+          % (k, CAP_LINES))
     parts.append(body)
     k += 1
 check(len(parts) > 1, "a %d-line memory should need more than one part" % WAKE_LINES)
@@ -135,7 +139,7 @@ check(len(lines) == WAKE_LINES, "woke with %d lines, want %d" % (len(lines), WAK
 check(lines[-1].startswith("#%d " % (N - 1)), "newest memory not last / not raw")
 check(lines[0].startswith("#0-"), "oldest line should be a summary block")
 check("memo wake 2" in run("wake").stdout, "part 1 must name the next command")
-check("last one" in run("wake", str(len(parts))).stdout, "last part must say it is last")
+check("awake." in run("wake", str(len(parts))).stdout, "last part must say it is last")
 check(run("wake", str(len(parts) + 1)).returncode == 1, "a nonexistent part should fail")
 
 # append-only: nothing was ever rewritten
@@ -148,7 +152,7 @@ for f in os.listdir(os.path.join(d, "TREE")):
           "TREE/%s is not a whole number of records" % f)
 
 # a block already written cannot be rewritten
-check("REJECTED" in run("sleep", "0-2", "attempted overwrite").stderr,
+check(run("sleep", "0-2", "attempted overwrite").returncode == 1,
       "rewriting a settled block was allowed")
 
 # recall reaches memories the summaries lost
@@ -168,10 +172,10 @@ check(run("wake").returncode == 1, "wake should refuse after a forget")
 n = 0
 while True:
     r = run("sleep")
-    if "You woke up" in r.stdout:
+    if "You are awake" in r.stdout:
         break
     bid = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")][0].split()[2]
-    check("REJECTED" not in run("sleep", bid, "rebuilt after forget").stderr, "rebuild rejected")
+    check(run("sleep", bid, "rebuilt after forget").returncode == 0, "rebuild rejected")
     n += 1
 check(n > 0, "forget created no work")
 check(run("wake").returncode == 0, "wake still refuses after rebuilding")
@@ -190,17 +194,63 @@ r = run("note", "ã" * 150)
 check(r.returncode == 1 and "300 bytes" in r.stderr,
       "multi-byte note dodged the byte limit: " + r.stderr)
 
-# a wrong summary can be dropped, with everything built on top of it
-
 # note landed -> its blocks are pending; settle before the final wake check
 while True:
     r = run("sleep")
-    if "You woke up" in r.stdout:
+    if "You are awake" in r.stdout:
         break
     bid = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")][0].split()[2]
     run("sleep", bid, "settled")
 check(run("wake").returncode == 0, "wake refuses at the very end")
 
+# a part is rendered as of T, so a note landing mid-wake cannot shift a
+# boundary and silently drop a line
+T0 = os.path.getsize(os.path.join(d, "LOG.txt")) // 320
+before = run("wake", "1", str(T0))
+check(before.returncode == 0, "as-of-T wake failed: " + before.stdout + before.stderr)
+run("note", "a note that lands between two wake calls")
+check(run("wake", "1", str(T0)).stdout == before.stdout,
+      "a note between parts changed an already-rendered part")
+check(run("wake", "1", str(T0 + 99)).returncode == 1, "wake accepted a future T")
+
+# recall must not hand back more than a harness will carry
+r = run("recall", "memory number")
+check(len(r.stdout) < CAP_CHARS, "recall returned %d chars" % len(r.stdout))
+check("Narrow the regex" in r.stdout, "recall did not say it had been capped")
+
+# ---- concurrency and crash recovery ----------------------------------
+
+d2 = tempfile.mkdtemp(prefix="optmem-race-")
+env2 = dict(os.environ, MEMORY_DIR=d2)
+P = 16
+procs = [subprocess.Popen(memo + ["note", "parallel note %d" % i], env=env2,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+         for i in range(P)]
+for p in procs:
+    p.wait()
+with open(os.path.join(d2, "LOG.txt"), "rb") as f:
+    recs = [f.read(320) for _ in range(P)]
+ids = [r.decode().split()[0] for r in recs if r.strip()]
+check(len(ids) == P, "%d of %d parallel notes survived" % (len(ids), P))
+check(len(set(ids)) == P, "parallel notes collided on an id: %s" % sorted(ids))
+check(sorted(ids) == sorted("#%d" % i for i in range(P)),
+      "parallel note ids are not 0..%d: %s" % (P - 1, sorted(ids)))
+
+# a crash mid-append leaves a partial record; the next append must drop it,
+# or every later record is misaligned forever
+with open(os.path.join(d2, "LOG.txt"), "ab") as f:
+    f.write(b"#99 2026-01-01 a half-written record killed by a power cut")
+r = subprocess.run(memo + ["note", "the memory right after a torn write"],
+                   env=env2, capture_output=True, text=True)
+check(r.returncode == 0, "note failed after a torn write: " + r.stderr)
+sz = os.path.getsize(os.path.join(d2, "LOG.txt"))
+check(sz % 320 == 0, "LOG.txt left misaligned after a torn write: %d" % sz)
+check("saved as #%d" % P in r.stdout, "torn record was counted as a memory")
+r = subprocess.run(memo + ["recall", "right after a torn write"], env=env2,
+                   capture_output=True, text=True)
+check("#%d " % P in r.stdout, "the memory after a torn write reads wrong")
+
+shutil.rmtree(d2)
 shutil.rmtree(d)
 print("\n%d passed, %d failed" % (ok, fail))
 sys.exit(1 if fail else 0)
