@@ -96,11 +96,11 @@ keeps a block whole when its size is small relative to its age, so **detail is
 proportional to recency**, and it spends exactly `WAKE_LINES` lines doing it:
 
 ```
-10,000 memories, WAKE_LINES = 256:
+10,000 memories, WAKE_LINES = 208:
 
   block size:    1    2    4    8   16   32   64  128  256
-  how many:     54   27   27   27   28   27   27   27   12
-                └ the last 54, verbatim ───────────▶ the first 3,000, 256:1
+  how many:     42   21   21   21   22   21   21   21   18
+                └ the last 42, verbatim ───────────▶ the first 4,600, 256:1
 ```
 
 The oldest memories are recalled as a vague shape, the newest word for word,
@@ -138,7 +138,7 @@ decisions; drop wording.
 ```
 bad   worked on the memory system today and made good progress on the design
 good  OptMem design settled: LOG.txt append-only truth, TREE binary merge
-      tree of 280-char summaries, wake renders a fixed 256-line document
+      tree of 280-char summaries, wake renders a fixed 208-line document
 ```
 
 ## Output is delivered in parts
@@ -152,7 +152,7 @@ piece:
   Codex        10,000 tokens         (configurable per call)
 ```
 
-A 256-line memory is ~64 KB, so a single-shot `memo wake` is mangled
+A 208-line memory is ~56 KB, so a single-shot `memo wake` is mangled
 everywhere, and silently.
 
 So `memo wake` pages the document into parts that fit all of them
@@ -174,7 +174,7 @@ $MEMORY_DIR/
               `memo` and are the only home for them.
 
               ENTRY_CHARS=280   longest a memory may be
-              WAKE_LINES=256    how many lines `memo wake` prints (~16k tokens)
+              WAKE_LINES=208    how many lines `memo wake` prints (~16k tokens)
               PART_CHARS=20000  how much of it fits in one command's output
               PART_LINES=500    ...and in how many lines
 ```

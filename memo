@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from blocks import cover  # noqa: E402
 
 ENTRY_CHARS = 280
-WAKE_LINES = 256
+WAKE_LINES = 208  # ~16k tokens of dense text, in 3 parts
 RAW_MAX = 16  # blocks up to this many memories compress from the raw log
 
 # Every harness truncates a command that prints too much, and each drops a

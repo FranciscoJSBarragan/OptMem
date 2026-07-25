@@ -27,8 +27,8 @@ DEFAULTS = {k: getattr(cli, k) for k in
             ("ENTRY_CHARS", "WAKE_LINES", "PART_CHARS", "PART_LINES")}
 
 N = 2000
-WAKE_LINES = 256
-PART_CHARS = 20000
+WAKE_LINES = cli.WAKE_LINES   # the shipped budget, not a second copy of it
+PART_CHARS = cli.PART_CHARS
 # Verified caps of the harnesses in the wild: Claude Code cuts a command's
 # output at 30,000 chars (middle), pi at 50 KB / 2000 lines (head), Codex
 # budgets 10,000 tokens. A part must fit the strictest of each kind.
