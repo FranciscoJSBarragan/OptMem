@@ -37,7 +37,7 @@ export MEMORY_DIR="$HOME/memory"     # required; there is no default
 ```sh
 memo wake                 # who you are. run this first, every session,
                           #   then the command each part names, until
-                          #   one of them prints `awake.`
+                          #   one of them prints `You are awake.`
 memo note "..."           # record a memory. one line, <= 280 chars.
 memo sleep                # compress. keep going until it says you woke up.
 memo recall <regex>       # search the raw log for detail a summary lost.

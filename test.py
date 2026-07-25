@@ -8,6 +8,7 @@ import contextlib
 import datetime
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,6 +110,18 @@ def run(*args, store=None):
     return Result(code, out.getvalue(), err.getvalue())
 
 
+def nap_id(out):
+    """The block id from the command a nap prompt offers."""
+    m = re.search(r"memo sleep (\d+)-(\d+)", out)
+    return "%s-%s" % m.groups() if m else None
+
+
+def offered(out):
+    """The line offering a command. Every command handed to an agent must be
+    an order, not a label: `Run: memo ...`, never `next: memo ...`."""
+    return [l for l in out.splitlines() if "memo sleep " in l or "memo wake " in l]
+
+
 # the real entry point still has to work: shebang, argv parsing, exit code
 smoke = subprocess.run(memo + ["wake"], env=dict(os.environ, MEMORY_DIR=d),
                        capture_output=True, text=True)
@@ -140,11 +153,13 @@ check(r.returncode == 1 and "Cannot wake" in r.stdout,
 naps = 0
 r = run("sleep")
 while "You are awake" not in r.stdout:
-    line = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")]
+    line = offered(r.stdout)
     check(bool(line), "no command offered:\n" + r.stdout + r.stderr)
     if not line:
         break
-    bid = line[0].split()[2]
+    check(line[0].startswith("Run: "), "a command was offered as a label, not "
+          "an order: %r" % line[0])
+    bid = nap_id(r.stdout)
     body = [l.strip() for l in r.stdout.splitlines()
             if l.startswith("  #") or (l.startswith("  ") and l.strip()
                                        and not l.strip().startswith("memo"))]
@@ -174,8 +189,10 @@ lines = [l for p in parts for l in p]
 check(len(lines) == WAKE_LINES, "woke with %d lines, want %d" % (len(lines), WAKE_LINES))
 check(lines[-1].startswith("#%d " % (N - 1)), "newest memory not last / not raw")
 check(lines[0].startswith("#0-"), "oldest line should be a summary block")
-check("memo wake 2" in run("wake").stdout, "part 1 must name the next command")
-check("awake." in run("wake", str(len(parts))).stdout, "last part must say it is last")
+check("Run: memo wake 2" in run("wake").stdout,
+      "part 1 must ORDER the next command, not label it")
+check("You are awake." in run("wake", str(len(parts))).stdout,
+      "last part must say it is last")
 check(run("wake", str(len(parts) + 1)).returncode == 1, "a nonexistent part should fail")
 
 # append-only: nothing was ever rewritten
@@ -210,7 +227,7 @@ while True:
     r = run("sleep")
     if "You are awake" in r.stdout:
         break
-    bid = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")][0].split()[2]
+    bid = nap_id(r.stdout)
     check(run("sleep", bid, "rebuilt after forget").returncode == 0, "rebuild rejected")
     n += 1
 check(n > 0, "forget created no work")
@@ -235,7 +252,7 @@ while True:
     r = run("sleep")
     if "You are awake" in r.stdout:
         break
-    bid = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")][0].split()[2]
+    bid = nap_id(r.stdout)
     run("sleep", bid, "settled")
 check(run("wake").returncode == 0, "wake refuses at the very end")
 
@@ -290,12 +307,11 @@ while True:
     r = run("sleep", store=d2)
     if "You are awake" in r.stdout:
         break
-    bid = [l for l in r.stdout.splitlines()
-           if l.strip().startswith("memo sleep ")][0].split()[2]
+    bid = nap_id(r.stdout)
     run("sleep", bid, "settled", store=d2)
 r = run("wake", store=d2)
-check(r.stdout.rstrip().endswith("awake."),
-      "a one-part wake never says `awake.`:\n" + r.stdout)
+check(r.stdout.rstrip().endswith("You are awake."),
+      "a one-part wake never says `You are awake.`:\n" + r.stdout)
 
 shutil.rmtree(d2)
 shutil.rmtree(d)

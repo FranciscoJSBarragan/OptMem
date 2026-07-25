@@ -272,7 +272,7 @@ def nap_prompt(d, lo, hi, left):
             "Keep every name, number, date and decision.\n"
             "Invent nothing. State the facts; do not describe them.\n\n"
             "%s\n\n"
-            "memo sleep %d-%d \"<your line>\"\n"
+            "Run: memo sleep %d-%d \"<your line>\"\n"
             "%d left after this." % (ENTRY_CHARS, body, lo, hi, left))
 
 
@@ -338,11 +338,11 @@ def cmd_wake(d, args):
         print("memory, part %d of %d, oldest first" % (k, len(parts)))
     print("\n".join(parts[k - 1]))
     if k < len(parts):
-        print("next: memo wake %d %d" % (k + 1, T))
+        print("Run: memo wake %d %d" % (k + 1, T))
     else:
         # always, even for a one-part memory: the contract an agent is given
         # is "run parts until one says awake", so it must always arrive
-        print("awake.")
+        print("You are awake.")
 
 
 def cmd_note(d, args):
