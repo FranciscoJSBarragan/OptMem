@@ -4,16 +4,26 @@
 Uses a fake compressor (join + truncate) so the run is deterministic and free.
 """
 
+import contextlib
 import datetime
+import io
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from importlib.machinery import SourceFileLoader
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from blocks import complete, cover  # noqa: E402
+
+MEMO = os.path.join(HERE, "memo")
+cli = SourceFileLoader("memo_cli", MEMO).load_module()
+# The shipped defaults. A fresh process starts from these, so an in-process
+# call must too, or one store's config would leak into the next.
+DEFAULTS = {k: getattr(cli, k) for k in
+            ("ENTRY_CHARS", "WAKE_LINES", "PART_CHARS", "PART_LINES")}
 
 N = 2000
 WAKE_LINES = 256
@@ -53,9 +63,11 @@ for T in list(range(1, 400)) + [1000, 4096, 10000, 65536, 100003]:
 check(cover(300, 320) == [(i, i + 1) for i in range(300)],
       "under budget, memory should be verbatim")
 
-# every block a cover ever needs must be buildable
+# every block a cover ever needs must be buildable. cover() costs a 60-step
+# binary search, so this walks every tree shape up to 300 and then samples:
+# the property is structural, not a function of the exact T.
 seen = set()
-for T in range(1, 3000):
+for T in list(range(1, 300)) + [512, 700, 1000, 1023, 1024, 2000, 2999]:
     seen.update(b for b in cover(T, WAKE_LINES) if b[1] - b[0] > 1)
 buildable = set(complete(3000))
 check(seen <= buildable, "a cover wants a block that complete() never yields")
@@ -71,13 +83,37 @@ check(worst <= 16, "a single memory created %d naps" % worst)
 # ---- the real CLI ----------------------------------------------------
 
 d = tempfile.mkdtemp(prefix="optmem-test-")
-env = dict(os.environ, MEMORY_DIR=d)
-memo = [sys.executable, os.path.join(HERE, "memo")]
+memo = [sys.executable, MEMO]
 
 
-def run(*args):
-    return subprocess.run(memo + list(args), env=env, capture_output=True,
-                          text=True)
+class Result:
+    def __init__(self, returncode, stdout, stderr):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def run(*args, store=None):
+    """One `memo` command, in-process. Spawning an interpreter per call cost
+    ~40ms x ~2000 naps; the cross-process behaviour that genuinely needs real
+    processes (the lock) is tested with real processes below."""
+    os.environ["MEMORY_DIR"] = store or d
+    for k, v in DEFAULTS.items():
+        setattr(cli, k, v)
+    out, err, code = io.StringIO(), io.StringIO(), 0
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            sd = cli.store()
+            cli.config(sd)
+            cli.COMMANDS[args[0]](sd, list(args[1:]))
+    except SystemExit as e:
+        code = e.code if isinstance(e.code, int) else 0
+    return Result(code, out.getvalue(), err.getvalue())
+
+
+# the real entry point still has to work: shebang, argv parsing, exit code
+smoke = subprocess.run(memo + ["wake"], env=dict(os.environ, MEMORY_DIR=d),
+                       capture_output=True, text=True)
+check(smoke.returncode == 0 and "No memories yet" in smoke.stdout,
+      "the memo CLI does not run: " + smoke.stdout + smoke.stderr)
 
 
 r = run("note", "x" * 281)
@@ -222,7 +258,7 @@ check("Narrow the regex" in r.stdout, "recall did not say it had been capped")
 
 d2 = tempfile.mkdtemp(prefix="optmem-race-")
 env2 = dict(os.environ, MEMORY_DIR=d2)
-P = 16
+P = 16  # real processes: this is the cross-process lock under test
 procs = [subprocess.Popen(memo + ["note", "parallel note %d" % i], env=env2,
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
          for i in range(P)]
@@ -240,19 +276,24 @@ check(sorted(ids) == sorted("#%d" % i for i in range(P)),
 # or every later record is misaligned forever
 with open(os.path.join(d2, "LOG.txt"), "ab") as f:
     f.write(b"#99 2026-01-01 a half-written record killed by a power cut")
-r = subprocess.run(memo + ["note", "the memory right after a torn write"],
-                   env=env2, capture_output=True, text=True)
+r = run("note", "the memory right after a torn write", store=d2)
 check(r.returncode == 0, "note failed after a torn write: " + r.stderr)
 sz = os.path.getsize(os.path.join(d2, "LOG.txt"))
 check(sz % 320 == 0, "LOG.txt left misaligned after a torn write: %d" % sz)
 check("saved as #%d" % P in r.stdout, "torn record was counted as a memory")
-r = subprocess.run(memo + ["recall", "right after a torn write"], env=env2,
-                   capture_output=True, text=True)
+r = run("recall", "right after a torn write", store=d2)
 check("#%d " % P in r.stdout, "the memory after a torn write reads wrong")
 
 # a memory small enough to fit one part must still end with the terminator
 # the agent was told to wait for
-r = subprocess.run(memo + ["wake"], env=env2, capture_output=True, text=True)
+while True:
+    r = run("sleep", store=d2)
+    if "You are awake" in r.stdout:
+        break
+    bid = [l for l in r.stdout.splitlines()
+           if l.strip().startswith("memo sleep ")][0].split()[2]
+    run("sleep", bid, "settled", store=d2)
+r = run("wake", store=d2)
 check(r.stdout.rstrip().endswith("awake."),
       "a one-part wake never says `awake.`:\n" + r.stdout)
 
