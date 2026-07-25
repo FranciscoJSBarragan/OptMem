@@ -76,6 +76,9 @@ def config(d):
             PART_CHARS = int(v)
         elif k == "PART_LINES":
             PART_LINES = int(v)
+    if ENTRY_CHARS > min(TREE_REC - 8, LOG_REC - 40):
+        die("config: ENTRY_CHARS=%d cannot fit the %d/%d-byte records."
+            % (ENTRY_CHARS, LOG_REC, TREE_REC))
 
 
 def log_path(d):
@@ -108,13 +111,15 @@ def log_get(d, i):
 
 
 def log_slice(d, lo, hi):
-    """Memories [lo,hi) in one read."""
+    """Memories [lo,hi) in one read. Records are sliced as BYTES and decoded
+    one by one -- slicing decoded text would shift every boundary after the
+    first multi-byte character."""
     with open(log_path(d), "rb") as f:
         f.seek(lo * LOG_REC)
-        buf = f.read((hi - lo) * LOG_REC).decode()
+        buf = f.read((hi - lo) * LOG_REC)
     out = []
     for i in range(hi - lo):
-        line = buf[i * LOG_REC:(i + 1) * LOG_REC].rstrip()
+        line = buf[i * LOG_REC:(i + 1) * LOG_REC].decode().rstrip()
         head, _, rest = line.partition(" ")
         date, _, text = rest.partition(" ")
         out.append((int(head[1:]), date, text))
@@ -206,9 +211,11 @@ def check(text):
     if "\n" in text or "\r" in text:
         die("REJECTED: %d lines. A memory is exactly one line." %
             (text.count("\n") + 1))
-    if len(text) > ENTRY_CHARS:
-        die("REJECTED: %d chars, %d over the %d limit. Compress it further."
-            % (len(text), len(text) - ENTRY_CHARS, ENTRY_CHARS))
+    n = len(text.encode())
+    if n > ENTRY_CHARS:
+        die("REJECTED: %d bytes, %d over the %d limit (accents and symbols "
+            "cost more than one). Compress it further."
+            % (n, n - ENTRY_CHARS, ENTRY_CHARS))
     return text
 
 
@@ -270,11 +277,12 @@ def paginate(lines):
     """Split the document into parts that survive any harness's output cap."""
     parts, cur, size = [], [], 0
     for line in lines:
-        if cur and (len(cur) >= PART_LINES or size + len(line) > PART_CHARS):
+        n = len(line.encode())
+        if cur and (len(cur) >= PART_LINES or size + n > PART_CHARS):
             parts.append(cur)
             cur, size = [], 0
         cur.append(line)
-        size += len(line) + 1
+        size += n + 1
     if cur:
         parts.append(cur)
     return parts
@@ -417,8 +425,8 @@ def cmd_import(d, args):
             die("line %d: date %s is older than the previous memory (%s). "
                 "Memories must be in order." % (i, date, last))
         text = text.strip()
-        if not text or len(text) > ENTRY_CHARS:
-            die("line %d: %d chars (limit %d)." % (i, len(text), ENTRY_CHARS))
+        if not text or len(text.encode()) > ENTRY_CHARS:
+            die("line %d: %d bytes (limit %d)." % (i, len(text.encode()), ENTRY_CHARS))
         out.append("#%d %s %s" % (T + len(out), date, text))
         last = date
     log_append(d, out)

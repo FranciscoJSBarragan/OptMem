@@ -155,7 +155,6 @@ check("REJECTED" in run("sleep", "0-2", "attempted overwrite").stderr,
 r = run("recall", "memory number 7,")
 check(r.returncode == 0 and "#7 " in r.stdout, "recall missed a memory")
 
-# a wrong summary can be dropped, with everything built on top of it
 def treesize():
     t = os.path.join(d, "TREE")
     return sum(os.path.getsize(os.path.join(t, f)) for f in os.listdir(t))
@@ -179,6 +178,28 @@ check(run("wake").returncode == 0, "wake still refuses after rebuilding")
 check(treesize() == before, "tree did not return to its original size")
 check(run("forget", "17-33").returncode == 1, "forgetting a non-block should fail")
 check(run("forget", "999998-1000000").returncode == 1, "forgetting a missing block should fail")
+
+# UTF-8: multi-byte characters must not shift record boundaries or dodge limits
+run("note", "reunião com João em São Paulo: ação aprovada, coração tranquilo")
+run("note", "a plain ascii memory right after the accented one")
+r = run("recall", "coração")
+check("João" in r.stdout, "recall lost the accented memory: " + r.stdout + r.stderr)
+r = run("recall", "plain ascii memory right after")
+check("#%d " % (N + 2) in r.stdout, "record after a multi-byte one reads shifted")
+r = run("note", "ã" * 150)
+check(r.returncode == 1 and "300 bytes" in r.stderr,
+      "multi-byte note dodged the byte limit: " + r.stderr)
+
+# a wrong summary can be dropped, with everything built on top of it
+
+# note landed -> its blocks are pending; settle before the final wake check
+while True:
+    r = run("sleep")
+    if "You woke up" in r.stdout:
+        break
+    bid = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")][0].split()[2]
+    run("sleep", bid, "settled")
+check(run("wake").returncode == 0, "wake refuses at the very end")
 
 shutil.rmtree(d)
 print("\n%d passed, %d failed" % (ok, fail))
