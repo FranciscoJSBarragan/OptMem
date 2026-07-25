@@ -114,10 +114,29 @@ check(naps == len(complete(N)), "did %d naps, expected %d" % (naps, len(complete
 
 r = run("wake")
 check(r.returncode == 0, "wake still refuses after a full sleep")
-lines = r.stdout.strip().splitlines()
+
+# the document survives pagination, and every part fits the strictest harness
+# output cap in the wild (Codex: 10 KiB or 256 lines)
+parts, k = [], 1
+while True:
+    r = run("wake", str(k))
+    if r.returncode != 0:
+        break
+    body = [l for l in r.stdout.splitlines()
+            if not l.startswith("---") and not l.startswith("    ")]
+    check(len(r.stdout) < 10240, "part %d is %d bytes, over Codex's 10 KiB cap"
+          % (k, len(r.stdout)))
+    check(len(r.stdout.splitlines()) < 256, "part %d is over Codex's 256-line cap" % k)
+    parts.append(body)
+    k += 1
+check(len(parts) > 1, "a %d-line memory should need more than one part" % WAKE_LINES)
+lines = [l for p in parts for l in p]
 check(len(lines) == WAKE_LINES, "woke with %d lines, want %d" % (len(lines), WAKE_LINES))
 check(lines[-1].startswith("#%d " % (N - 1)), "newest memory not last / not raw")
 check(lines[0].startswith("#0-"), "oldest line should be a summary block")
+check("memo wake 2" in run("wake").stdout, "part 1 must name the next command")
+check("last one" in run("wake", str(len(parts))).stdout, "last part must say it is last")
+check(run("wake", str(len(parts) + 1)).returncode == 1, "a nonexistent part should fail")
 
 # append-only: nothing was ever rewritten
 sizes = {f: os.path.getsize(os.path.join(d, f)) for f in ("LOG.txt", "TREE.txt")}

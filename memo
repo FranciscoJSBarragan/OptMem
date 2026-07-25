@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OptMem: a permanent, append-only memory for AI agents.
 
-  memo wake                print who you are
+  memo wake [part]         print who you are
   memo note "..."          record a memory
   memo sleep [id "..."]    compress
   memo recall <regex>      search the raw log
@@ -24,6 +24,13 @@ ENTRY_CHARS = 280
 WAKE_LINES = 320
 RAW_MAX = 16  # blocks up to this many memories compress from the raw log
 
+# Every agent harness silently truncates a command that prints too much --
+# Codex at 10 KiB or 256 lines, Claude Code at 30k chars, pi at 50 KB -- and
+# each drops a different part. So the memory is handed over in parts that fit
+# the strictest of them. These are transport limits, not memory limits.
+PART_CHARS = 8000
+PART_LINES = 200
+
 
 # ---------------------------------------------------------------- store
 
@@ -42,11 +49,12 @@ def store():
 
 
 def config(d):
-    global ENTRY_CHARS, WAKE_LINES
+    global ENTRY_CHARS, WAKE_LINES, PART_CHARS, PART_LINES
     p = os.path.join(d, "config")
     if not os.path.exists(p):
         with open(p, "w") as f:
-            f.write("ENTRY_CHARS=%d\nWAKE_LINES=%d\n" % (ENTRY_CHARS, WAKE_LINES))
+            f.write("ENTRY_CHARS=%d\nWAKE_LINES=%d\nPART_CHARS=%d\nPART_LINES=%d\n"
+                    % (ENTRY_CHARS, WAKE_LINES, PART_CHARS, PART_LINES))
         return
     for line in open(p):
         line = line.split("#")[0].strip()
@@ -57,6 +65,10 @@ def config(d):
             ENTRY_CHARS = int(v)
         elif k == "WAKE_LINES":
             WAKE_LINES = int(v)
+        elif k == "PART_CHARS":
+            PART_CHARS = int(v)
+        elif k == "PART_LINES":
+            PART_LINES = int(v)
 
 
 def read_log(d):
@@ -167,6 +179,20 @@ def nap_prompt(d, log, tree, todo):
 
 # ---------------------------------------------------------------- commands
 
+def paginate(lines):
+    """Split the document into parts that survive any harness's output cap."""
+    parts, cur, size = [], [], 0
+    for line in lines:
+        if cur and (len(cur) >= PART_LINES or size + len(line) > PART_CHARS):
+            parts.append(cur)
+            cur, size = [], 0
+        cur.append(line)
+        size += len(line) + 1
+    if cur:
+        parts.append(cur)
+    return parts
+
+
 def cmd_wake(d, args):
     log, tree = read_log(d), read_tree(d)
     todo = pending(log, tree)
@@ -180,11 +206,28 @@ def cmd_wake(d, args):
         print("You have no memories yet. This is your first moment.\n"
               "Record what matters with: memo note \"...\"")
         return
-    for lo, hi in cover(len(log), WAKE_LINES):
-        if hi - lo == 1:
-            print("#%d %s %s" % log[lo])
-        else:
-            print("#%d-%d %s" % (lo, hi - 1, tree[(lo, hi)]))
+    lines = ["#%d %s %s" % log[lo] if hi - lo == 1 else
+             "#%d-%d %s" % (lo, hi - 1, tree[(lo, hi)])
+             for lo, hi in cover(len(log), WAKE_LINES)]
+    parts = paginate(lines)
+    k = 1
+    if args:
+        if len(args) != 1 or not args[0].isdigit():
+            die("usage: memo wake [part]")
+        k = int(args[0])
+        if not 1 <= k <= len(parts):
+            die("There is no part %d. Your memory has %d." % (k, len(parts)))
+    if len(parts) > 1:
+        print("--- your memory, part %d of %d (oldest first) ---" % (k, len(parts)))
+    print("\n".join(parts[k - 1]))
+    if k < len(parts):
+        print("--- END OF PART %d. You are still half awake: you have NOT seen "
+              "your most recent\n    memories yet, and acting now would be "
+              "acting blind. Run `memo wake %d`\n    RIGHT NOW, and keep going "
+              "until a part tells you that was the last one. ---" % (k, k + 1))
+    elif len(parts) > 1:
+        print("--- END OF PART %d, the last one. That is your whole memory. "
+              "You are awake. ---" % k)
 
 
 def cmd_note(d, args):

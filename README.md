@@ -35,7 +35,8 @@ export MEMORY_DIR="$HOME/memory"     # required; there is no default
 ## Use
 
 ```sh
-memo wake                 # who you are. run this first, every session.
+memo wake                 # who you are. run this first, every session,
+                          #   then `memo wake 2`, `3`... until it says so.
 memo note "..."           # record a memory. one line, <= 280 chars.
 memo sleep                # compress. keep going until it says you woke up.
 memo recall <regex>       # search the raw log for detail a summary lost.
@@ -129,6 +130,18 @@ good  OptMem design settled: LOG.txt append-only truth, TREE.txt binary merge
       tree of 280-char summaries, wake renders a fixed 320-line document
 ```
 
+## Output is delivered in parts
+
+Every harness truncates an over-long command, and each one drops a different
+piece: Codex cuts at 10 KiB or 256 lines, Claude Code at 30,000 characters,
+pi at 50 KB. A 320-line memory is ~79 KB, so a single-shot `memo wake` gets
+mangled everywhere — and silently.
+
+So `memo wake` pages the document into parts that fit the strictest of them
+(`PART_CHARS`, `PART_LINES`), and each part ends by naming the exact command
+for the next one. Nothing is ever dropped, and no harness is special-cased: if
+yours is more generous, raise the two settings and get fewer parts.
+
 ## Files
 
 ```
@@ -137,6 +150,8 @@ $MEMORY_DIR/
   TREE.txt    lo-hi text        a cache. each block written once, unless forgotten.
   config      ENTRY_CHARS=280   longest a memory may be
               WAKE_LINES=320    how many lines `memo wake` prints (~24k tokens)
+              PART_CHARS=8000   how much of it fits in one command's output
+              PART_LINES=200    ...and in how many lines
 ```
 
 Both files are plain text, sorted by construction, and safe to read with any
@@ -186,6 +201,13 @@ RUN `memo wake` NOW — before answering, before reading anything else, before
 any other tool call. Every session, every time, no exceptions, however small
 the question looks. Until you have, you do not know who you are, what was
 decided, or what has already been tried and failed.
+
+Your memory arrives in numbered parts, oldest first, because every agent
+harness silently truncates a command that prints too much. `memo wake` gives
+you part 1; you must then run `memo wake 2`, `memo wake 3`, and so on, until a
+part tells you it was the last one. Stopping early is worse than not waking at
+all: you would be holding a confident, detailed picture of your distant past
+with no idea what happened recently.
 
 Then, while you work:
 
