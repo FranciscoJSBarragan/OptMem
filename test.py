@@ -139,41 +139,46 @@ check("last one" in run("wake", str(len(parts))).stdout, "last part must say it 
 check(run("wake", str(len(parts) + 1)).returncode == 1, "a nonexistent part should fail")
 
 # append-only: nothing was ever rewritten
-sizes = {f: os.path.getsize(os.path.join(d, f)) for f in ("LOG.txt", "TREE.txt")}
+logsz = os.path.getsize(os.path.join(d, "LOG.txt"))
 run("note", "one more thing happened today")
-for f, s in sizes.items():
-    check(os.path.getsize(os.path.join(d, f)) >= s, "%s shrank" % f)
-tree = open(os.path.join(d, "TREE.txt")).read().splitlines()
-check(len(tree) == len(set(l.split()[0] for l in tree)), "a block was written twice")
+check(os.path.getsize(os.path.join(d, "LOG.txt")) > logsz, "note did not append")
+check(logsz % 320 == 0, "LOG.txt is not a whole number of records")
+for f in os.listdir(os.path.join(d, "TREE")):
+    check(os.path.getsize(os.path.join(d, "TREE", f)) % 288 == 0,
+          "TREE/%s is not a whole number of records" % f)
 
-# writing a block twice is refused, not duplicated
-r = run("sleep", tree[0].split()[0], "attempted overwrite")
-check("Already dreamt" in r.stdout, "rewriting a block was allowed")
+# a block already written cannot be rewritten
+check("REJECTED" in run("sleep", "0-2", "attempted overwrite").stderr,
+      "rewriting a settled block was allowed")
 
 # recall reaches memories the summaries lost
 r = run("recall", "memory number 7,")
 check(r.returncode == 0 and "#7 " in r.stdout, "recall missed a memory")
 
 # a wrong summary can be dropped, with everything built on top of it
-before = len(open(os.path.join(d, "TREE.txt")).read().splitlines())
-logsize = os.path.getsize(os.path.join(d, "LOG.txt"))
+def treesize():
+    t = os.path.join(d, "TREE")
+    return sum(os.path.getsize(os.path.join(t, f)) for f in os.listdir(t))
+
+before, logsize = treesize(), os.path.getsize(os.path.join(d, "LOG.txt"))
 r = run("forget", "16-32")
 check("16-32" in r.stdout, "forget did not report the block: " + r.stdout + r.stderr)
-gone = set(open(os.path.join(d, "TREE.txt")).read().splitlines())
-check(not any(l.startswith("16-32 ") for l in gone), "forgotten block still present")
-check(not any(l.startswith("0-64 ") for l in gone), "an ancestor survived a forget")
+check(treesize() < before, "forget did not shrink the tree")
 check(os.path.getsize(os.path.join(d, "LOG.txt")) == logsize, "forget touched the log")
 check(run("wake").returncode == 1, "wake should refuse after a forget")
 n = 0
-while "You woke up" not in run("sleep").stdout:
+while True:
     r = run("sleep")
+    if "You woke up" in r.stdout:
+        break
     bid = [l for l in r.stdout.splitlines() if l.strip().startswith("memo sleep ")][0].split()[2]
-    run("sleep", bid, "rebuilt after forget")
+    check("REJECTED" not in run("sleep", bid, "rebuilt after forget").stderr, "rebuild rejected")
     n += 1
-check(n == before - len(gone), "rebuilt %d blocks, forgot %d" % (n, before - len(gone)))
+check(n > 0, "forget created no work")
 check(run("wake").returncode == 0, "wake still refuses after rebuilding")
-r = run("forget", "999999-1000000")
-check(r.returncode == 1, "forgetting a nonexistent block should fail")
+check(treesize() == before, "tree did not return to its original size")
+check(run("forget", "17-33").returncode == 1, "forgetting a non-block should fail")
+check(run("forget", "999998-1000000").returncode == 1, "forgetting a missing block should fail")
 
 shutil.rmtree(d)
 print("\n%d passed, %d failed" % (ok, fail))

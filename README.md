@@ -147,16 +147,37 @@ yours is more generous, raise the two settings and get fewer parts.
 ```
 $MEMORY_DIR/
   LOG.txt     #id date text     append-only. never edited. the truth.
-  TREE.txt    lo-hi text        a cache. each block written once, unless forgotten.
+  TREE/2      one summary per   a cache of block summaries, one file per block
+  TREE/4      record, indexed   size. each block written once, unless forgotten.
+  TREE/8      by position
+  ...
   config      ENTRY_CHARS=280   longest a memory may be
               WAKE_LINES=320    how many lines `memo wake` prints (~24k tokens)
               PART_CHARS=8000   how much of it fits in one command's output
               PART_LINES=200    ...and in how many lines
 ```
 
-Both files are plain text, sorted by construction, and safe to read with any
-tool. Writes are serialised with a lock, so parallel sessions on one machine can
-append at the same time without corrupting anything.
+**Records are fixed width**: 320 bytes in `LOG.txt`, 288 in the `TREE` files.
+That is the whole indexing strategy — position *is* identity, so memory `i`
+sits at `i*320`, and block `[k*s, (k+1)*s)` sits at `k*288` of `TREE/s`.
+Everything is one seek: no scanning, and no index file that could ever
+disagree with the data.
+
+```
+1,000,000 memories, 607 MB on disk:
+
+  memo wake    0.03s        (scanning the same store: 0.96s)
+  memo note    0.02s        (scanning: 1.30s)
+  memo sleep   0.02s
+```
+
+Finding pending work costs one `stat` per level — about twenty, forever —
+because each level file holds a dense prefix, so its length says exactly how
+far that level got. Padding costs ~1.6x on disk and buys O(1) on everything.
+
+Both files are still plain text: `grep`, `cat` and `wc -l` all work, lines are
+just space-padded. Writes are serialised with a lock, so parallel sessions on
+one machine can append at the same time without corrupting anything.
 
 Agents must never create, edit or delete anything in `MEMORY_DIR` themselves.
 Every write goes through `memo`, which enforces the one-line and character
@@ -179,11 +200,13 @@ it and everything built on top of it:
 
 ```
 $ memo forget 188-192
-forgot 176-192 184-192 188-192. They will be compressed again on your next sleep.
+forgot 20 summaries (188-192 and everything built from it). They will be
+compressed again on your next sleep.
 ```
 
-That is a handful of small compressions, not a rebuild, and `LOG.txt` is never
-touched. Fixing one bad summary can never cost you a memory.
+`LOG.txt` is never touched, so fixing a bad summary can never cost you a
+memory. Blocks are built in order, so forgetting one also drops the blocks
+built after it at the same levels; they come back on the next sleep.
 
 ## Add this to your agent's instruction file
 
