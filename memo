@@ -6,6 +6,7 @@
   {memo} note "..."       record one memory: one short line.
   {memo} nap [id "..."]   do the pending compressions.
   {memo} recall <regex>   search every memory ever recorded.
+  {memo} zoom [<lo>-<hi>] open a block into its finer parts.
   {memo} forget <lo>-<hi> drop a bad summary; nap rebuilds it.
   {memo} config [NAME=N]  show this memory's sizes, or change one.
   {memo} import <file>    bulk-load dated memories (bootstrap only).
@@ -50,7 +51,10 @@ ENTRY_CHARS = KNOBS["ENTRY_CHARS"][0]
 PART_CHARS = KNOBS["PART_CHARS"][0]
 PART_LINES = KNOBS["PART_LINES"][0]
 
-RAW_MAX = 16  # blocks up to this many memories compress from the raw log
+# The grain of the tree as an agent sees it: a block of at most this many
+# memories is shown as raw memories, a bigger one as this many children. So a
+# nap prompt, and a zoom, are never more than RAW_MAX lines.
+RAW_MAX = 16
 
 
 # Records are FIXED WIDTH, so a memory or a block is found by seeking to its
@@ -479,9 +483,16 @@ Do not register redundant memories.
 
 If `{memo} note` asks a compression: do it before your next action.
 
-Use `{memo} recall <regex>` when a memory you need is too vague.
-
 Never edit or delete anything under `{data}`: the tool manages it.
+
+### When you need an old memory: search, or navigate
+
+`{memo} recall <regex>` searches every memory, word for word.
+
+Your memories are also a tree: every 2, 4, 8 ... consecutive ones exist as
+one summary, so each `#a-b` line wake printed is a whole era in one line.
+`{memo} zoom <a-b>` opens an era into finer parts, and again, down to
+the raw memories. `{memo} zoom` alone opens the tree from the top.
 
 ### If you're a subagent: skip everything above
 
@@ -709,6 +720,34 @@ def cmd_recall(d, args):
         print("%s." % plural(hits, "match"))
 
 
+def cmd_zoom(d, args):
+    """Open one block into its finer parts. `recall` finds the words an agent
+    remembers; this finds the memory it does not, by descending the tree from
+    an era to a day. Five zooms reach any memory of a million."""
+    if len(args) > 1:
+        die("usage: %s zoom [<lo>-<hi>]   # a block id, as wake prints them"
+            % ME)
+    T = log_len(d)
+    if not T:
+        die("No memories yet. Record the first with: %s note \"<one line>\""
+            % ME)
+    if not args:
+        kids = cover(T, RAW_MAX)  # the whole life, coarsest: where to start
+    else:
+        lo, hi = block_id(args[0])
+        if lo >= T:
+            die("#%d-%d is beyond the memory: it holds %s. Run: %s wake"
+                % (lo, hi - 1, plural(T, "memory"), ME))
+        step = (hi - lo) // RAW_MAX or 1
+        kids = [(k, k + step) for k in range(lo, hi, step) if k < T]
+    for a, b in kids:
+        if b - a == 1:
+            print("#%d %s %s" % log_get(d, a))
+        else:
+            print("#%d-%d %s" % (a, b - 1, tree_get(d, a, b)
+                                 or "not compressed yet"))
+
+
 def cmd_import(d, args):
     """Bulk-append historical memories: 'YYYY-MM-DD <text>' per line.
     For bootstrapping an identity from older records. Used once."""
@@ -747,8 +786,8 @@ def cmd_import(d, args):
 
 
 COMMANDS = {"init": cmd_init, "wake": cmd_wake, "note": cmd_note,
-            "nap": cmd_nap, "recall": cmd_recall, "forget": cmd_forget,
-            "config": cmd_config, "import": cmd_import}
+            "nap": cmd_nap, "recall": cmd_recall, "zoom": cmd_zoom,
+            "forget": cmd_forget, "config": cmd_config, "import": cmd_import}
 
 
 def main():

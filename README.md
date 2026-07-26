@@ -1,6 +1,6 @@
 # OptMem
 
-Permanent memory for AI agents. A 333-token prompt, a script, plug and play.
+Permanent memory for AI agents. A 433-token prompt, a script, plug and play.
 
 ![how OptMem works](anim/optmem.gif)
 
@@ -24,6 +24,7 @@ The tool lands at `~/.optmem/memo`; put `~/.optmem` on `PATH` to type `memo`.
 | `memo note "..."` | record one memory: one line, up to 280 chars |
 | `memo nap` | answer the merges that came due |
 | `memo recall <regex>` | search every memory ever recorded, word for word |
+| `memo zoom <lo>-<hi>` | open a block into finer parts, down to raw memories |
 | `memo forget <lo>-<hi>` | drop a bad summary; the next nap rebuilds it |
 
 Merges arrive one at a time, in the output of `note`. Nothing ever runs in the
@@ -85,9 +86,16 @@ Do not register redundant memories.
 
 If `~/.optmem/memo note` asks a compression: do it before your next action.
 
-Use `~/.optmem/memo recall <regex>` when a memory you need is too vague.
-
 Never edit or delete anything under `~/.optmem/memory`: the tool manages it.
+
+### When you need an old memory: search, or navigate
+
+`~/.optmem/memo recall <regex>` searches every memory, word for word.
+
+Your memories are also a tree: every 2, 4, 8 ... consecutive ones exist as
+one summary, so each `#a-b` line wake printed is a whole era in one line.
+`~/.optmem/memo zoom <a-b>` opens an era into finer parts, and again, down to
+the raw memories. `~/.optmem/memo zoom` alone opens the tree from the top.
 
 ### If you're a subagent: skip everything above
 
