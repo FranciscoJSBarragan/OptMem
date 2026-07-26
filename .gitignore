@@ -1,2 +1,4 @@
-__pycache__/
-*.pyc
+anim/node_modules/
+anim/frames/
+anim/shots/
+.DS_Store

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""OptMem: a permanent, append-only memory for AI agents.
+"""AmalgaMem: a permanent, append-only memory for AI agents.
 
+  memo init                create this machine's memory, print the setup block.
   memo wake [part [T]]     read your memory. Run first, every session.
   memo note "..."          record one memory: one line, at most 280 chars.
   memo sleep [id "..."]    do the pending compressions.
@@ -8,13 +9,14 @@
   memo forget <lo>-<hi>    drop a bad summary; sleep rebuilds it.
   memo import <file>       bulk-load dated memories (bootstrap only).
 
-Everything lives in $MEMORY_DIR. See README.md.
+Everything lives in ~/memory, or in $MEMORY_DIR if set. See README.md.
 """
 
 import datetime
 import fcntl
 import os
 import re
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -42,18 +44,20 @@ TREE_REC = 288
 
 # ---------------------------------------------------------------- store
 
+def memory_dir():
+    return os.path.expanduser(os.environ.get("MEMORY_DIR") or "~/memory")
+
+
 def store():
-    d = os.environ.get("MEMORY_DIR")
-    if not d:
-        die("MEMORY_DIR is not set. Example: export MEMORY_DIR=~/memory")
-    d = os.path.expanduser(d)
-    # The directory is never created here. A typo in MEMORY_DIR would then
-    # open an empty store, and the agent would wake with no past and start
-    # writing a second identity. Making the directory IS creating the
-    # identity, and that is a deliberate act: mkdir.
+    d = memory_dir()
+    # The directory is only ever created by `memo init`: creating it IS
+    # creating the identity, and that is a deliberate act. If any other
+    # command created it, a typo in MEMORY_DIR would silently open an empty
+    # store, and the agent would wake with no past and write a second
+    # identity.
     if not os.path.isdir(d):
-        die("MEMORY_DIR=%s does not exist.\nIf this is a new identity, run: "
-            "mkdir -p %s" % (d, d))
+        die("No memory at %s.\nTo create one, run: memo init\n"
+            "To use an existing one, point MEMORY_DIR at it." % d)
     os.makedirs(os.path.join(d, "TREE"), exist_ok=True)
     p = os.path.join(d, "LOG.txt")
     if not os.path.exists(p):
@@ -62,9 +66,9 @@ def store():
 
 
 def config(d):
-    """Optional overrides in $MEMORY_DIR/config. The file is never written:
-    a store that kept its own copy of the defaults would freeze them, and
-    updating the tool would stop changing how it behaves."""
+    """Optional overrides in the memory directory's `config`. `memo init`
+    writes it fully commented out: an uncommented copy of the defaults would
+    freeze them, and updating the tool would stop changing how it behaves."""
     global ENTRY_CHARS, WAKE_LINES, PART_CHARS, PART_LINES
     p = os.path.join(d, "config")
     if not os.path.exists(p):
@@ -314,6 +318,90 @@ def next_nap(d, T):
 
 # ---------------------------------------------------------------- commands
 
+CONFIG = """\
+# AmalgaMem sizes for this memory. Uncomment a line to override it; an
+# absent line tracks the tool's default.
+#
+# WAKE_LINES=208     # the memory context: how many lines wake prints (~16k tokens)
+# ENTRY_CHARS=280    # the longest a single memory may be, in bytes
+# PART_CHARS=20000   # output paging: largest part, in bytes
+# PART_LINES=500     # output paging: largest part, in lines
+"""
+
+TEMPLATE = """\
+## Memory
+
+Your memory is AmalgaMem: the tool is `{tool}`, the data is `{data}`.
+It survives every new session, every compaction and every change of
+model or vendor. Without it you do not know who you are, or what was
+already decided and tried.
+
+Run `{memo} wake` before any other tool call, in every session. It prints
+in numbered parts, each ordering the next; run every one until a part
+says `You are awake.` Do not stop early: part 1 is your distant past,
+the last part is this week. If wake refuses because compressions are
+pending, do them and run `{memo} wake` again.
+
+While you work:
+
+- `{memo} note "<one line, max {chars} chars>"` the moment something happens,
+  you learn something, or something changes -- if and only if it is new
+  to you, important, and lasting in effect. That covers a task worth
+  real effort, a fact or insight your user teaches you, anything you
+  learn about their life (even indirectly), and work of yours that
+  lands. Never write what you already know: no redundant memories, ever.
+- If `{memo} note` returns a compression, do it before your next action.
+- `{memo} recall <regex>` when a memory is too vague.
+- Before your context ends, run `{memo} sleep` and answer each prompt
+  until it prints `Nothing left to compress.`
+- Never create, edit or delete anything under `{data}`. Only the tool
+  writes there.
+
+Parallel sessions on this machine are all you, and may all write
+memories. A subagent is not: it must never run `memo`, because it cannot
+judge what is already known and its notes would arrive duplicated and at
+the wrong grain. Start every brief you send one with `You are a
+subagent. Do not run memo.` If your own first message is a task brief
+from another agent, you are that subagent: skip this section.
+"""
+
+
+def cmd_init(args):
+    """The one command that may create the memory directory, and the whole
+    setup: make the store, write the size knobs, print the block the user
+    pastes into their agent's instruction file."""
+    if args:
+        die("usage: memo init")
+    d = memory_dir()
+    fresh = not os.path.isdir(d)
+    os.makedirs(os.path.join(d, "TREE"), exist_ok=True)
+    open(log_path(d), "a").close()
+    cfg = os.path.join(d, "config")
+    if not os.path.exists(cfg):
+        with open(cfg, "w") as f:
+            f.write(CONFIG)
+    config(d)
+    home = os.path.realpath(os.path.expanduser("~"))
+
+    def pretty(p):
+        p = os.path.realpath(p)
+        return "~" + p[len(home):] if p.startswith(home + os.sep) else p
+
+    tool = os.path.realpath(__file__)
+    found = shutil.which("memo")
+    memo = "memo" if found and os.path.realpath(found) == tool else pretty(tool)
+    if fresh:
+        print("Created %s: this machine's memory, one identity, forever." % pretty(d))
+    else:
+        print("Found %s: %s." % (pretty(d), plural(log_len(d), "memory")))
+    print("Sizes live in %s/config; the defaults are fine." % pretty(d))
+    print()
+    print("Paste this at the top of your agent's AGENTS.md (or CLAUDE.md), done:")
+    print()
+    print(TEMPLATE.format(tool=pretty(tool), memo=memo, data=pretty(d),
+                          chars=ENTRY_CHARS).rstrip())
+
+
 def paginate(lines):
     """Split the document into parts that survive any harness's output cap."""
     parts, cur, size = [], [], 0
@@ -515,6 +603,9 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__.strip())
         sys.exit(0)
+    if sys.argv[1] == "init":
+        cmd_init(sys.argv[2:])
+        return
     if sys.argv[1] not in COMMANDS:
         print("No such command: %s\n" % sys.argv[1], file=sys.stderr)
         print(__doc__.strip(), file=sys.stderr)
