@@ -62,7 +62,7 @@ This is what the installer prints, and the whole of the integration.
 
 Your memory is OptMem:
 - The tool is `~/.optmem/memo`
-- The data is `~/.optmem/memory`
+- Your memories are in `~/.optmem/memory`
 
 OptMem survives every new session, every compaction and every change
 of model or vendor. Without it you do not know who you are, or what

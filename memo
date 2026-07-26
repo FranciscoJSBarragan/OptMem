@@ -408,7 +408,7 @@ TEMPLATE = """\
 
 Your memory is OptMem:
 - The tool is `{memo}`
-- The data is `{data}`
+- Your memories are in `{data}`
 
 OptMem survives every new session, every compaction and every change
 of model or vendor. Without it you do not know who you are, or what
