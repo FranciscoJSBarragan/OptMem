@@ -122,14 +122,14 @@ def run(*args, store=None):
 
 def nap_id(out):
     """The block id from the command a nap prompt offers."""
-    m = re.search(r"memo sleep (\d+)-(\d+)", out)
+    m = re.search(r"memo nap (\d+)-(\d+)", out)
     return "%s-%s" % m.groups() if m else None
 
 
 def offered(out):
     """The line offering a command. Every command handed to an agent must be
     an order, not a label: `Run: memo ...`, never `next: memo ...`."""
-    return [l for l in out.splitlines() if "memo sleep " in l or "memo wake " in l]
+    return [l for l in out.splitlines() if "memo nap " in l or "memo wake " in l]
 
 
 # the real entry point still has to work: shebang, argv parsing, exit code
@@ -192,9 +192,9 @@ check("run memo wake again" in r.stdout,
       "the refusal must order the agent back to wake")
 check("None" not in r.stdout, "the refusal printed a Python None")
 
-# sleep loop, with a fake compressor
+# nap loop, with a fake compressor
 naps = 0
-r = run("sleep")
+r = run("nap")
 check("Compress memories #" in r.stdout, "nap prompt must name its object")
 while "Nothing left to compress" not in r.stdout:
     line = offered(r.stdout)
@@ -205,15 +205,15 @@ while "Nothing left to compress" not in r.stdout:
           "an order: %r" % line[0])
     bid = nap_id(r.stdout)
     body = [l.strip() for l in r.stdout.splitlines() if l.startswith("  #")]
-    r = run("sleep", bid, (" ".join(body)[:280]).strip() or "empty")
-    check(r.returncode == 0, "sleep rejected a valid nap: " + r.stderr)
+    r = run("nap", bid, (" ".join(body)[:280]).strip() or "empty")
+    check(r.returncode == 0, "nap rejected a valid merge: " + r.stderr)
     naps += 1
 check("You are awake" not in r.stdout,
-      "sleep must never claim the agent is awake; only wake may")
+      "nap must never claim the agent is awake; only wake may")
 check(naps == len(complete(N)), "did %d naps, expected %d" % (naps, len(complete(N))))
 
 r = run("wake")
-check(r.returncode == 0, "wake still refuses after a full sleep")
+check(r.returncode == 0, "wake still refuses after a full nap chain")
 
 # the document survives pagination, and every part fits every harness's cap
 parts, k = [], 1
@@ -248,10 +248,10 @@ for f in os.listdir(os.path.join(d, "TREE")):
     check(os.path.getsize(os.path.join(d, "TREE", f)) % 288 == 0,
           "TREE/%s is not a whole number of records" % f)
 
-# a sleep when nothing is pending writes nothing and says so
-r = run("sleep", "0-1", "attempted overwrite")
+# a nap when nothing is pending writes nothing and says so
+r = run("nap", "0-1", "attempted overwrite")
 check(r.returncode == 0 and "Nothing left to compress" in r.stdout,
-      "sleep with nothing pending must say so and write nothing")
+      "nap with nothing pending must say so and write nothing")
 
 # recall reaches memories the summaries lost, and matches the whole line:
 # id and date included, not just the text
@@ -278,22 +278,22 @@ check(run("wake").returncode == 1, "wake should refuse after a forget")
 # a settled block cannot be rewritten. Resubmitting one (two sessions paid
 # the same nap) is not an error: say it is settled, write nothing
 mid = treesize()
-r = run("sleep", "0-1", "attempted overwrite")
+r = run("nap", "0-1", "attempted overwrite")
 check(r.returncode == 0 and "already settled" in r.stdout,
       "resubmitting a settled block was not reported as settled: " + r.stderr)
 check(treesize() == mid, "resubmitting a settled block wrote something")
 # a block that is neither settled nor next (here: a dropped ancestor,
 # submitted before its half is rebuilt) is a real mistake
-r = run("sleep", "0-31", "out of order")
+r = run("nap", "0-31", "out of order")
 check(r.returncode == 1 and "Wrong block" in r.stderr,
       "an out-of-order block was accepted")
 n = 0
 while True:
-    r = run("sleep")
+    r = run("nap")
     if "Nothing left to compress" in r.stdout:
         break
     bid = nap_id(r.stdout)
-    check(run("sleep", bid, "rebuilt after forget").returncode == 0, "rebuild rejected")
+    check(run("nap", bid, "rebuilt after forget").returncode == 0, "rebuild rejected")
     n += 1
 check(n > 0, "forget created no work")
 check(run("wake").returncode == 0, "wake still refuses after rebuilding")
@@ -314,11 +314,11 @@ check(r.returncode == 1 and "300 bytes" in r.stderr,
 
 # note landed -> its blocks are pending; settle before the final wake check
 while True:
-    r = run("sleep")
+    r = run("nap")
     if "Nothing left to compress" in r.stdout:
         break
     bid = nap_id(r.stdout)
-    run("sleep", bid, "settled")
+    run("nap", bid, "settled")
 check(run("wake").returncode == 0, "wake refuses at the very end")
 
 # a part is rendered as of T, so a note landing mid-wake cannot shift a
@@ -336,10 +336,10 @@ check(run("wake", "1", str(T0 + 99)).returncode == 1, "wake accepted a future T"
 # never count as negative work, or the rest of the wake is refused with an
 # impossible number.
 while True:
-    r = run("sleep")
+    r = run("nap")
     if "Nothing left to compress" in r.stdout:
         break
-    run("sleep", nap_id(r.stdout), "settled mid-wake")
+    run("nap", nap_id(r.stdout), "settled mid-wake")
 r = run("wake", "1", str(T0))
 check(r.returncode == 0 and r.stdout == before.stdout,
       "a compression paid mid-wake broke the rest of the wake:\n"
@@ -386,11 +386,11 @@ check("#%d " % P in r.stdout, "the memory after a torn write reads wrong")
 # a memory small enough to fit one part must still end with the terminator
 # the agent was told to wait for
 while True:
-    r = run("sleep", store=d2)
+    r = run("nap", store=d2)
     if "Nothing left to compress" in r.stdout:
         break
     bid = nap_id(r.stdout)
-    run("sleep", bid, "settled", store=d2)
+    run("nap", bid, "settled", store=d2)
 r = run("wake", store=d2)
 check(r.stdout.rstrip().endswith("You are awake."),
       "a one-part wake never says `You are awake.`:\n" + r.stdout)

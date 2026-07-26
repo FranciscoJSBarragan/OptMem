@@ -4,9 +4,9 @@
   memo init                create this machine's memory, print the setup block.
   memo wake [part [T]]     read your memory. Run first, every session.
   memo note "..."          record one memory: one short line.
-  memo sleep [id "..."]    do the pending compressions.
+  memo nap [id "..."]      do the pending compressions.
   memo recall <regex>      search every memory ever recorded.
-  memo forget <lo>-<hi>    drop a bad summary; sleep rebuilds it.
+  memo forget <lo>-<hi>    drop a bad summary; nap rebuilds it.
   memo config [NAME=N]     show this memory's sizes, or change one.
   memo import <file>       bulk-load dated memories (bootstrap only).
 
@@ -379,7 +379,7 @@ def nap_prompt(d, lo, hi, left):
         for a, b in ((lo, mid), (mid, hi)):
             s = tree_get(d, a, b)
             if s is None:
-                die("Summary %d-%d is missing. Run: memo sleep" % (a, b - 1))
+                die("Summary %d-%d is missing. Run: memo nap" % (a, b - 1))
             halves.append("  #%d-%d %s" % (a, b - 1, s))
         body = "\n".join(halves)
     tail = "" if not left else "\n%s after this one." % (
@@ -389,7 +389,7 @@ def nap_prompt(d, lo, hi, left):
             "Keep what has lasting effect, drop what does not. Invent "
             "nothing.\n\n"
             "%s\n%s\n"
-            "Run: memo sleep %d-%d \"<your line>\""
+            "Run: memo nap %d-%d \"<your line>\""
             % (lo, hi - 1, ENTRY_CHARS, body, tail, lo, hi - 1))
 
 
@@ -561,12 +561,12 @@ def cmd_note(d, args):
         print("\n" + nap)
 
 
-def cmd_sleep(d, args):
+def cmd_nap(d, args):
     T, said = log_len(d), False
     if args:
         said = True
         if len(args) != 2:
-            die("usage: memo sleep <lo>-<hi> \"<one line>\"")
+            die("usage: memo nap <lo>-<hi> \"<one line>\"")
         m = re.fullmatch(r"(\d+)-(\d+)", args[0])
         if not m:
             die("'%s' is not a block id. Copy it from the prompt." % args[0])
@@ -580,7 +580,7 @@ def cmd_sleep(d, args):
                 print("%d-%d is already settled." % (lo, hi - 1))
             else:
                 die("Wrong block: %s. Blocks are built in order; the next is "
-                    "%d-%d. Run: memo sleep"
+                    "%d-%d. Run: memo nap"
                     % (args[0], todo[0][0], todo[0][1] - 1))
         elif not tree_put(d, lo, hi, check(args[1])):
             print("%d-%d was settled or forgotten meanwhile." % (lo, hi - 1))
@@ -618,7 +618,7 @@ def cmd_config(d, args):
 
 def cmd_forget(d, args):
     """A summary can be wrong -- mistyped, or a bad compression. Drop it and
-    everything built on top of it; the next sleep computes them again. The log
+    everything built on top of it; the next nap computes them again. The log
     is untouched, so nothing is ever actually lost."""
     if len(args) != 1:
         die("usage: memo forget <lo>-<hi>")
@@ -633,7 +633,7 @@ def cmd_forget(d, args):
     gone = tree_drop(d, lo, hi)
     if not gone:
         die("No summary at %s." % args[0])
-    print("Forgot %s, from %d-%d up. Run: memo sleep"
+    print("Forgot %s, from %d-%d up. Run: memo nap"
           % (plural(len(gone), "summary"), gone[0][0], gone[0][1] - 1))
 
 
@@ -699,11 +699,11 @@ def cmd_import(d, args):
           % (plural(len(out), "memory"), base, base + len(out) - 1))
     n = pending_count(d, log_len(d))
     if n:
-        print("%s pending. Run: memo sleep" % plural(n, "compression"))
+        print("%s pending. Run: memo nap" % plural(n, "compression"))
 
 
 COMMANDS = {"init": cmd_init, "wake": cmd_wake, "note": cmd_note,
-            "sleep": cmd_sleep, "recall": cmd_recall, "forget": cmd_forget,
+            "nap": cmd_nap, "recall": cmd_recall, "forget": cmd_forget,
             "config": cmd_config, "import": cmd_import}
 
 

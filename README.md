@@ -20,9 +20,9 @@ update.
 |---|---|
 | `memo wake` | read the memory — the first command of every session |
 | `memo note "..."` | record one memory: one line, up to 280 chars |
-| `memo sleep` | answer the merges that came due |
+| `memo nap` | answer the merges that came due |
 | `memo recall <regex>` | search every memory ever recorded, word for word |
-| `memo forget <lo>-<hi>` | drop a bad summary; the next sleep rebuilds it |
+| `memo forget <lo>-<hi>` | drop a bad summary; the next nap rebuilds it |
 
 Merges arrive one at a time, in the output of `note`. Nothing ever runs in the
 background.
