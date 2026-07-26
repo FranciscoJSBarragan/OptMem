@@ -410,17 +410,13 @@ Your memory is OptMem:
 - The tool is `{memo}`
 - Your memories are in `{data}`
 
-OptMem survives every new session, every compaction and every change
-of model or vendor. Without it you do not know who you are, or what
-was already decided and tried.
+OptMem outlives every session, compaction, model and vendor change.
+Without it you do not know who you are, or what was decided and tried.
 
 ### At startup: activating OptMem (mandatory)
 
-Run `{memo} wake` before any other tool call, in every session.
-It prints in numbered parts, each ordering the next; run every one until
-a part says `You are awake.` Do not stop early: part 1 is your distant
-past, the last part is this week. If wake refuses because compressions
-are pending, do them and run `{memo} wake` again.
+Run `{memo} wake` before any other tool call, in every session, and do
+exactly what it prints, until it prints `You are awake.`
 
 ### While working: register memories (mandatory)
 
@@ -535,7 +531,10 @@ def cmd_wake(d, args):
         print("Your memory, part %d of %d, oldest first." % (k, len(parts)))
     print("\n".join(parts[k - 1]))
     if k < len(parts):
-        print("Run: memo wake %d %d" % (k + 1, T))
+        # This footer is the only instruction that survives every harness's
+        # truncation (pi drops the HEAD of a long output), so it has to say
+        # both that the read is unfinished and how to continue it.
+        print("Not awake yet. Run: memo wake %d %d" % (k + 1, T))
     else:
         # always, even for a one-part memory: the contract an agent is given
         # is "run parts until one says awake", so it must always arrive

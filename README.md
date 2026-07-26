@@ -64,17 +64,13 @@ Your memory is OptMem:
 - The tool is `~/.optmem/memo`
 - Your memories are in `~/.optmem/memory`
 
-OptMem survives every new session, every compaction and every change
-of model or vendor. Without it you do not know who you are, or what
-was already decided and tried.
+OptMem outlives every session, compaction, model and vendor change.
+Without it you do not know who you are, or what was decided and tried.
 
 ### At startup: activating OptMem (mandatory)
 
-Run `~/.optmem/memo wake` before any other tool call, in every session.
-It prints in numbered parts, each ordering the next; run every one until
-a part says `You are awake.` Do not stop early: part 1 is your distant
-past, the last part is this week. If wake refuses because compressions
-are pending, do them and run `~/.optmem/memo wake` again.
+Run `~/.optmem/memo wake` before any other tool call, in every session, and do
+exactly what it prints, until it prints `You are awake.`
 
 ### While working: register memories (mandatory)
 
