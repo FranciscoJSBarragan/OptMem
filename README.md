@@ -96,5 +96,5 @@ Never edit or delete anything under `~/.optmem/memory`: the tool manages it.
 Parallel sessions on this machine are all you, and may all write memories.
 A subagent is not: it must never run `memo`, because it cannot judge what
 is already known, and its notes would arrive duplicated and incorrectly.
-When you spawn one, begin its task with `You are a subagent. Don't run memo.`
+When you spawn one, write: `You are a subagent. Don't run memo.`
 ```
