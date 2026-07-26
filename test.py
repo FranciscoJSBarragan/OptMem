@@ -431,6 +431,57 @@ r = run("wake", store=d2)
 check(r.stdout.rstrip().endswith("You are awake."),
       "a one-part wake never says `You are awake.`:\n" + r.stdout)
 
+# a blank summary record (a corrupt write) is work nap cannot see: wake must
+# name the one exit, `forget`, instead of refusing forever
+d3 = tempfile.mkdtemp(prefix="optmem-blank-")
+for i in range(4):
+    run("note", "corrupt store memory %d" % i, store=d3)
+for bid, s in (("0-1", "one"), ("2-3", "two"), ("0-3", "all")):
+    run("nap", bid, s, store=d3)
+with open(os.path.join(d3, "config"), "w") as f:
+    f.write("WAKE_LINES = 2\n")
+with open(os.path.join(d3, "TREE", "2"), "r+b") as f:
+    f.write(b" " * 287 + b"\n")
+r = run("wake", store=d3)
+check(r.returncode == 1 and "forget 0-1" in r.stderr
+      and "None" not in r.stdout,
+      "a blank summary must point at forget:\n" + r.stdout + r.stderr)
+
+# an unreadable level is a filesystem failure and must surface as one --
+# reading it as "not compressed yet" offers work that cannot be done
+os.chmod(os.path.join(d3, "TREE", "2"), 0)
+r_ = subprocess.run(memo + ["wake"], capture_output=True, text=True,
+                    env=dict(os.environ, MEMORY_DIR=d3))
+check(r_.returncode == 1 and "Permission denied" in r_.stderr
+      and "not compressed" not in r_.stdout,
+      "an unreadable level was read as pending work: " + r_.stdout + r_.stderr)
+os.chmod(os.path.join(d3, "TREE", "2"), 0o644)
+
+# an impossible calendar date would poison every later import: the store's
+# order check compares against it forever
+with open(os.path.join(d3, "bad.txt"), "w") as f:
+    f.write("2027-99-99 an impossible date\n")
+r = run("import", os.path.join(d3, "bad.txt"), store=d3)
+check(r.returncode == 1 and "not a real date" in r.stderr,
+      "import accepted an impossible date: " + r.stdout + r.stderr)
+shutil.rmtree(d3)
+
+# the same blank-record dead end at the other site: a big block's half
+d4 = tempfile.mkdtemp(prefix="optmem-half-")
+for i in range(32):
+    run("note", "half probe memory %d" % i, store=d4)
+while True:
+    r = run("nap", store=d4)
+    if "Compress memories #0-31 " in r.stdout:
+        break
+    run("nap", nap_id(r.stdout), "settled", store=d4)
+with open(os.path.join(d4, "TREE", "16"), "r+b") as f:
+    f.write(b" " * 287 + b"\n")
+r = run("nap", store=d4)
+check(r.returncode == 1 and "forget 0-15" in r.stderr,
+      "a blank half summary must point at forget: " + r.stdout + r.stderr)
+shutil.rmtree(d4)
+
 # re-running init on a lived-in store must not touch one byte of it: the
 # whole setup is idempotent, so it is safe on every provision. `init` only
 # ever makedirs(exist_ok), opens LOG.txt for APPEND, and writes `config`
