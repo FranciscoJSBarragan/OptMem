@@ -1,6 +1,6 @@
 # OptMem
 
-Permanent memory for AI agents. A 335-token prompt, a script, plug and play.
+Permanent memory for AI agents. A 333-token prompt, a script, plug and play.
 
 ![how OptMem works](anim/optmem.gif)
 
@@ -69,8 +69,8 @@ Without it you do not know who you are, or what was decided and tried.
 
 ### At startup: activating OptMem (mandatory)
 
-Run `~/.optmem/memo wake` before any other tool call, in every session, and do
-exactly what it prints, until it prints `You are awake.`
+Run `~/.optmem/memo wake` before any other tool call, in every session, and
+then do exactly what it prints, to the end of its output.
 
 ### While working: register memories (mandatory)
 

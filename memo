@@ -415,8 +415,8 @@ Without it you do not know who you are, or what was decided and tried.
 
 ### At startup: activating OptMem (mandatory)
 
-Run `{memo} wake` before any other tool call, in every session, and do
-exactly what it prints, until it prints `You are awake.`
+Run `{memo} wake` before any other tool call, in every session, and
+then do exactly what it prints, to the end of its output.
 
 ### While working: register memories (mandatory)
 
@@ -503,13 +503,6 @@ def cmd_wake(d, args):
                     % (T, plural(now, "entry")))
     # A part is rendered as of T, so a note landing between two parts cannot
     # shift a boundary and drop a line.
-    nap = next_nap(d, T)
-    if nap:
-        n = max(1, pending_count(d, T))
-        print("Cannot wake: %s pending. Do %s, then run memo wake again.\n"
-              % (plural(n, "compression"), "it" if n == 1 else "them"))
-        print(nap)
-        sys.exit(1)
     if not T:
         print("No memories yet. Record the first with: memo note \"<one line>\"")
         print("You are awake.")
@@ -521,7 +514,17 @@ def cmd_wake(d, args):
         else:
             s = tree_get(d, lo, hi)
             if s is None:
-                die("Summary %d-%d is missing. Run: memo sleep" % (lo, hi - 1))
+                # The ONLY reason to refuse: this document cannot be written
+                # without that summary. Work that the document does not need
+                # is handed over after the read instead, costing no round
+                # trip.
+                print("Cannot wake: the memory context needs #%d-%d, which is "
+                      "not compressed yet.\nDo the %s below, then run memo "
+                      "wake again.\n"
+                      % (lo, hi - 1,
+                         plural(pending_count(d, T), "compression")))
+                print(next_nap(d, T))
+                sys.exit(1)
             lines.append("#%d-%d %s" % (lo, hi - 1, s))
     parts = paginate(lines)
     if not 1 <= k <= len(parts):
@@ -539,6 +542,9 @@ def cmd_wake(d, args):
         # always, even for a one-part memory: the contract an agent is given
         # is "run parts until one says awake", so it must always arrive
         print("You are awake.")
+        nap = next_nap(d, T)
+        if nap:
+            print("\n" + nap)
 
 
 def cmd_note(d, args):
