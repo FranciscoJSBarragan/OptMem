@@ -385,6 +385,32 @@ r = run("wake", store=d2)
 check(r.stdout.rstrip().endswith("You are awake."),
       "a one-part wake never says `You are awake.`:\n" + r.stdout)
 
+# re-running init on a lived-in store must not touch one byte of it: the
+# whole setup is idempotent, so it is safe on every provision. `init` only
+# ever makedirs(exist_ok), opens LOG.txt for APPEND, and writes `config`
+# when absent -- never truncating, never overwriting a tuned config.
+def fingerprint(path):
+    out = {}
+    for root, _, files in os.walk(path):
+        for f in files:
+            if f == ".lock":
+                continue
+            p = os.path.join(root, f)
+            out[os.path.relpath(p, path)] = open(p, "rb").read()
+    return out
+
+
+with open(os.path.join(d, "config"), "a") as f:
+    f.write("WAKE_LINES=120\n")          # a size the user tuned by hand
+before = fingerprint(d)
+check(len(before) > 3 and before["LOG.txt"], "the store under test is empty")
+for _ in range(3):
+    r = run("init")
+    check(r.returncode == 0 and "Found" in r.stdout, "init on a live store failed")
+check(fingerprint(d) == before, "init modified an existing memory")
+r = run("wake")
+check(r.stdout.rstrip().endswith("You are awake."), "wake broke after re-init")
+
 shutil.rmtree(d2)
 shutil.rmtree(d)
 print("\n%d passed, %d failed" % (ok, fail))

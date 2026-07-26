@@ -366,13 +366,13 @@ from another agent, you are that subagent: skip this section.
 """
 
 
-def cmd_init(args):
+def cmd_init(d, args):
     """The one command that may create the memory directory, and the whole
     setup: make the store, write the size knobs, print the block the user
-    pastes into their agent's instruction file."""
+    pastes into their agent's instruction file. Re-running it is safe: it
+    only ever creates what is missing, and never rewrites what is there."""
     if args:
         die("usage: memo init")
-    d = memory_dir()
     fresh = not os.path.isdir(d)
     os.makedirs(os.path.join(d, "TREE"), exist_ok=True)
     open(log_path(d), "a").close()
@@ -595,24 +595,29 @@ def cmd_import(d, args):
         print("%s pending. Run: memo sleep" % plural(n, "compression"))
 
 
-COMMANDS = {"wake": cmd_wake, "note": cmd_note, "sleep": cmd_sleep,
-            "recall": cmd_recall, "forget": cmd_forget, "import": cmd_import}
+COMMANDS = {"init": cmd_init, "wake": cmd_wake, "note": cmd_note,
+            "sleep": cmd_sleep, "recall": cmd_recall, "forget": cmd_forget,
+            "import": cmd_import}
 
 
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip())
         sys.exit(0)
-    if sys.argv[1] == "init":
-        cmd_init(sys.argv[2:])
-        return
-    if sys.argv[1] not in COMMANDS:
-        print("No such command: %s\n" % sys.argv[1], file=sys.stderr)
+    cmd = sys.argv[1]
+    if cmd not in COMMANDS:
+        print("No such command: %s\n" % cmd, file=sys.stderr)
         print(__doc__.strip(), file=sys.stderr)
         sys.exit(1)
+    # `init` is the only command that may run without an existing memory:
+    # it is the one that creates it. Every other command refuses, so a typo
+    # in MEMORY_DIR is an error instead of a second, empty identity.
+    if cmd == "init":
+        cmd_init(memory_dir(), sys.argv[2:])
+        return
     d = store()
     config(d)
-    COMMANDS[sys.argv[1]](d, sys.argv[2:])
+    COMMANDS[cmd](d, sys.argv[2:])
 
 
 if __name__ == "__main__":
