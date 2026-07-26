@@ -1,7 +1,6 @@
 # OptMem
 
-Permanent memory for AI agents. Nothing is ever deleted, and what the agent
-reads at wake is always the same size.
+Permanent memory for AI agents. No database, no server: a prompt and a script, plug and play.
 
 ![how OptMem works](anim/optmem.gif)
 
@@ -12,8 +11,8 @@ curl -fsSL https://raw.githubusercontent.com/VictorTaelin/OptMem/main/install.sh
 ```
 
 It prints a `## Memory` block. Paste that at the top of your agent's
-`AGENTS.md` (or `CLAUDE.md`), and you are done: no daemon, no database, no
-embeddings, no plugin. Run the same line again to update.
+`AGENTS.md` (or `CLAUDE.md`), and you are done. Run the same line again to
+update.
 
 ## Commands
 
