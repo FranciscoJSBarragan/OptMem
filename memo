@@ -23,6 +23,14 @@ import sys
 from collections import deque
 
 
+# The store is UTF-8 by construction, so the tool reads and prints UTF-8
+# no matter what the machine's locale says. Without this, one arrow in a
+# memory makes wake crash on a latin-1 locale.
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):  # Python 3.7+
+        _s.reconfigure(encoding="utf-8")
+
+
 def pretty(p):
     """A path as the user would type it: keep symlinks, fold $HOME to ~."""
     p, home = os.path.abspath(p), os.path.expanduser("~")
@@ -162,7 +170,7 @@ def overrides(d):
     p = os.path.join(d, "config")
     if not os.path.exists(p):
         return out
-    for n, line in enumerate(open(p), 1):
+    for n, line in enumerate(open(p, encoding="utf-8"), 1):
         line = line.split("#")[0].strip()
         if "=" not in line:
             continue
@@ -191,7 +199,7 @@ def write_config(d, over):
     for k, (default, what) in KNOBS.items():
         out.append("%-2s%-12s = %-6d # %s"
                    % ("" if k in over else "# ", k, over.get(k, default), what))
-    with open(os.path.join(d, "config"), "w") as f:
+    with open(os.path.join(d, "config"), "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
 
 
@@ -274,7 +282,11 @@ def tree_get(d, lo, hi):
             rec = f.read(TREE_REC)
     except FileNotFoundError:  # not built yet; any other failure is real
         return None
-    return rec.decode().rstrip() or None
+    try:
+        return rec.decode().rstrip() or None
+    except UnicodeDecodeError:
+        die("The summary of #%d-%d is corrupt. Run: %s forget %d-%d"
+            % (lo, hi - 1, ME, lo, hi - 1))
 
 
 def pad(text, rec):
@@ -745,7 +757,11 @@ def cmd_import(d, args):
     For bootstrapping an identity from older records. Used once."""
     if len(args) != 1:
         die("usage: %s import <file>   # lines of 'YYYY-MM-DD <text>'" % ME)
-    src = open(args[0]).readlines()
+    try:
+        src = open(args[0], encoding="utf-8").readlines()
+    except UnicodeDecodeError:
+        die("%s is not UTF-8 text. Convert it, then import again."
+            % pretty(args[0]))
     last = log_get(d, log_len(d) - 1)[1] if log_len(d) else "0000-00-00"
     out = []
     for i, line in enumerate(src, 1):

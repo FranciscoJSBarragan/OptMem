@@ -537,6 +537,36 @@ check(r.returncode == 1 and "forget 0-15" in r.stderr,
       "a blank half summary must point at forget: " + r.stdout + r.stderr)
 shutil.rmtree(d4)
 
+# the store is UTF-8 whatever the locale says: without pinning the streams,
+# one arrow in a memory made wake crash forever on a latin-1 machine
+d5 = tempfile.mkdtemp(prefix="optmem-utf8-")
+run("note", "an arrow \u2192 survives any locale", store=d5)
+r_ = subprocess.run(memo + ["wake"], capture_output=True,
+                    env=dict(os.environ, MEMORY_DIR=d5,
+                             PYTHONIOENCODING="latin-1"))
+check(r_.returncode == 0 and "\u2192".encode() in r_.stdout,
+      "wake must print UTF-8 on a non-UTF-8 locale: "
+      + repr(r_.stdout + r_.stderr))
+
+# an import file that is not UTF-8 is refused -- neither a traceback nor,
+# worse, silently mis-decoded into mojibake and stored forever
+with open(os.path.join(d5, "latin1.txt"), "wb") as f:
+    f.write(b"2027-01-01 caf\xe9 in latin-1\n")
+r = run("import", os.path.join(d5, "latin1.txt"), store=d5)
+check(r.returncode == 1 and "not UTF-8" in r.stderr,
+      "a non-UTF-8 import file must be refused: " + r.stdout + r.stderr)
+
+# a summary record holding invalid UTF-8 is the blank-record dead end in
+# another coat: it must name forget, not print a traceback
+run("note", "utf8 probe second memory", store=d5)
+run("nap", "0-1", "both utf8 probes", store=d5)
+with open(os.path.join(d5, "TREE", "2"), "r+b") as f:
+    f.write(b"\xff\xfe corrupt bytes")
+r = run("zoom", "0-3", store=d5)
+check(r.returncode == 1 and "forget 0-1" in r.stderr,
+      "a corrupt summary must point at forget: " + r.stdout + r.stderr)
+shutil.rmtree(d5)
+
 # re-running init on a lived-in store must not touch one byte of it: the
 # whole setup is idempotent, so it is safe on every provision. `init` only
 # ever makedirs(exist_ok), opens LOG.txt for APPEND, and writes `config`
