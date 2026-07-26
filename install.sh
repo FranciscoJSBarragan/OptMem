@@ -6,13 +6,10 @@
 
 set -e
 DIR="$HOME/.optmem"
-SRC="https://raw.githubusercontent.com/VictorTaelin/OptMem/main"
 
 mkdir -p "$DIR"
-for f in memo blocks.py; do
-  curl -fsSL "$SRC/$f" -o "$DIR/$f.new"
-  mv "$DIR/$f.new" "$DIR/$f"
-done
+curl -fsSL https://raw.githubusercontent.com/VictorTaelin/OptMem/main/memo -o "$DIR/memo.new"
+mv "$DIR/memo.new" "$DIR/memo"
 chmod +x "$DIR/memo"
 
 exec "$DIR/memo" init

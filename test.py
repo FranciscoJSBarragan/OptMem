@@ -16,11 +16,21 @@ import tempfile
 from importlib.machinery import SourceFileLoader
 
 HERE = os.path.dirname(os.path.realpath(__file__))
-sys.path.insert(0, HERE)
-from blocks import complete, cover  # noqa: E402
-
 MEMO = os.path.join(HERE, "memo")
 cli = SourceFileLoader("memo_cli", MEMO).load_module()
+cover = cli.cover
+
+
+def complete(T):
+    """Every block buildable from T memories, smallest first. The oracle for
+    the tool's `pending()`: written straight from the definition, so a bug in
+    the fast version (which reads level lengths, never scanning) shows up."""
+    out, size = [], 2
+    while size <= T:
+        out += [(i * size, (i + 1) * size) for i in range(T // size)]
+        size *= 2
+    return out
+
 # The shipped defaults. A fresh process starts from these, so an in-process
 # call must too, or one store's config would leak into the next.
 DEFAULTS = {k: getattr(cli, k) for k in
@@ -399,6 +409,18 @@ def fingerprint(path):
             out[os.path.relpath(p, path)] = open(p, "rb").read()
     return out
 
+
+# `memo config` is how a size is changed: it writes the file the tool reads
+# back, an empty value restores the default, and a wake obeys immediately --
+# nothing is recomputed, because a size only selects what gets printed.
+r = run("config", "WAKE_LINES=12")
+check("12" in r.stdout and "default 208" in r.stdout, "config did not set:\n" + r.stdout)
+check(len(run("wake").stdout.splitlines()) <= 13, "wake ignored the new size")
+r = run("config", "WAKE_LINES=")
+check("default" not in r.stdout, "an empty value did not restore the default")
+check(len(run("wake").stdout.splitlines()) > 13, "the default did not come back")
+for bad in ("WAKE_LINES=0", "WAKE_LINES=x", "ENTRY_CHARS=999", "NOPE=1", "WAKE_LINES"):
+    check(run("config", bad).returncode == 1, "config accepted %s" % bad)
 
 with open(os.path.join(d, "config"), "a") as f:
     f.write("WAKE_LINES=120\n")          # a size the user tuned by hand

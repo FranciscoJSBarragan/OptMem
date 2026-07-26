@@ -3,10 +3,11 @@
 
   memo init                create this machine's memory, print the setup block.
   memo wake [part [T]]     read your memory. Run first, every session.
-  memo note "..."          record one memory: one line, at most 280 chars.
+  memo note "..."          record one memory: one short line.
   memo sleep [id "..."]    do the pending compressions.
   memo recall <regex>      search every memory ever recorded.
   memo forget <lo>-<hi>    drop a bad summary; sleep rebuilds it.
+  memo config [NAME=N]     show this memory's sizes, or change one.
   memo import <file>       bulk-load dated memories (bootstrap only).
 
 The memories live in ~/.optmem/memory, or in $MEMORY_DIR if set. See README.md.
@@ -18,19 +19,25 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from blocks import cover  # noqa: E402
-
-ENTRY_CHARS = 280
-WAKE_LINES = 208  # ~16k tokens of dense text, in 3 parts
-RAW_MAX = 16  # blocks up to this many memories compress from the raw log
-
+# The sizes a memory may override in its own `config` file: the default, and
+# what it means. `memo config` shows and edits them. The globals below start
+# at these defaults, so a memory that overrides nothing follows the tool.
+KNOBS = {
+    "WAKE_LINES": (208, "the memory context: how many lines wake prints"),
+    "ENTRY_CHARS": (280, "the longest one memory may be, in bytes"),
+    "PART_CHARS": (20000, "output paging: largest part, in bytes"),
+    "PART_LINES": (500, "output paging: largest part, in lines"),
+}
+WAKE_LINES = KNOBS["WAKE_LINES"][0]  # ~16k tokens of dense text, in 3 parts
+ENTRY_CHARS = KNOBS["ENTRY_CHARS"][0]
 # Every harness truncates a command that prints too much, and each drops a
 # different piece: Claude Code cuts the middle at 30,000 chars, pi cuts the
 # head at 50 KB, Codex budgets 10,000 tokens. So the memory is handed over in
 # parts that fit all of them. These are transport limits, not memory limits.
-PART_CHARS = 20000
-PART_LINES = 500
+PART_CHARS = KNOBS["PART_CHARS"][0]
+PART_LINES = KNOBS["PART_LINES"][0]
+
+RAW_MAX = 16  # blocks up to this many memories compress from the raw log
 
 
 # Records are FIXED WIDTH, so a memory or a block is found by seeking to its
@@ -39,6 +46,64 @@ PART_LINES = 500
 # k*TREE_REC of TREE/<s>. Padding costs ~2x on disk and buys O(1) everywhere.
 LOG_REC = 320
 TREE_REC = 288
+
+
+# ---------------------------------------------------------------- blocks
+
+# A BLOCK is an aligned power-of-two range of memories, [lo,hi), compressed
+# into one line. Blocks form a binary merge tree over LOG.txt: block [lo,hi)
+# is the compression of [lo,mid) and [mid,hi).
+
+def _cover(T, alpha):
+    """Tile [0,T) with aligned power-of-two blocks; keep a block whole iff its
+    size is at most `alpha` times its age. Bigger alpha = coarser = fewer
+    lines."""
+    root = 1
+    while root < T:
+        root *= 2
+    out, stack = [], [(0, root)]
+    while stack:
+        lo, hi = stack.pop()
+        if lo >= T:
+            continue
+        size = hi - lo
+        if size > 1 and (hi > T or size > alpha * (T - lo)):
+            mid = (lo + hi) // 2
+            stack.append((mid, hi))
+            stack.append((lo, mid))
+        else:
+            out.append((lo, hi))
+    out.sort()
+    return out
+
+
+def cover(T, budget):
+    """The blocks `memo wake` prints: at most `budget` of them, finest near T.
+
+    Detail decays with age, so recent memories stay verbatim and ancient ones
+    collapse. If everything fits, nothing is compressed at all."""
+    if T <= 0:
+        return []
+    if T <= budget:
+        return [(i, i + 1) for i in range(T)]
+    lo, hi = 0.0, 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if len(_cover(T, mid)) > budget:
+            lo = mid
+        else:
+            hi = mid
+    out = _cover(T, hi)
+    # Block sizes jump in powers of two, so alpha alone can undershoot the
+    # budget. Spend what is left on the present, where detail is worth most.
+    while len(out) < budget:
+        i = max((i for i, b in enumerate(out) if b[1] - b[0] > 1), default=None)
+        if i is None:
+            break
+        lo_, hi_ = out[i]
+        mid = (lo_ + hi_) // 2
+        out[i:i + 1] = [(lo_, mid), (mid, hi_)]
+    return out
 
 
 # ---------------------------------------------------------------- store
@@ -64,30 +129,51 @@ def store():
     return d
 
 
-def config(d):
-    """Optional overrides in the memory directory's `config`. `memo init`
-    writes it fully commented out: an uncommented copy of the defaults would
-    freeze them, and updating the tool would stop changing how it behaves."""
-    global ENTRY_CHARS, WAKE_LINES, PART_CHARS, PART_LINES
+def size(k, v):
+    """Validate one knob, wherever it came from: the config file or argv."""
+    if not v.isdigit() or int(v) < 1:
+        die("%s must be a positive whole number, not '%s'." % (k, v))
+    top = min(TREE_REC - 8, LOG_REC - 40)
+    if k == "ENTRY_CHARS" and int(v) > top:
+        die("ENTRY_CHARS is at most %d: a memory has to fit the fixed-width "
+            "records." % top)
+    return int(v)
+
+
+def overrides(d):
+    """The knobs this memory sets for itself, read from its `config` file."""
+    out = {}
     p = os.path.join(d, "config")
     if not os.path.exists(p):
-        return
+        return out
     for line in open(p):
         line = line.split("#")[0].strip()
         if "=" not in line:
             continue
         k, v = (s.strip() for s in line.split("=", 1))
-        if k == "ENTRY_CHARS":
-            ENTRY_CHARS = int(v)
-        elif k == "WAKE_LINES":
-            WAKE_LINES = int(v)
-        elif k == "PART_CHARS":
-            PART_CHARS = int(v)
-        elif k == "PART_LINES":
-            PART_LINES = int(v)
-    if ENTRY_CHARS > min(TREE_REC - 8, LOG_REC - 40):
-        die("config: ENTRY_CHARS=%d does not fit the %d/%d-byte records."
-            % (ENTRY_CHARS, LOG_REC, TREE_REC))
+        if k not in KNOBS:
+            die("config: %s is not a size. Run: memo config" % k)
+        out[k] = size(k, v)
+    return out
+
+
+def config(d):
+    """Apply this memory's overrides. A knob it does not set keeps the tool's
+    default, so updating the tool still changes how it behaves."""
+    for k, v in overrides(d).items():
+        globals()[k] = v  # a knob's name IS the name of the global it sets
+
+
+def write_config(d, over):
+    """Rewrite `config`: every knob on its own line, commented out unless this
+    memory overrides it."""
+    out = ["# OptMem sizes for this memory. A commented line means: follow the",
+           "# tool's default. Edit with `memo config NAME=VALUE`.", ""]
+    for k, (default, what) in KNOBS.items():
+        out.append("%-2s%-12s = %-6d # %s"
+                   % ("" if k in over else "# ", k, over.get(k, default), what))
+    with open(os.path.join(d, "config"), "w") as f:
+        f.write("\n".join(out) + "\n")
 
 
 def log_path(d):
@@ -317,16 +403,6 @@ def next_nap(d, T):
 
 # ---------------------------------------------------------------- commands
 
-CONFIG = """\
-# OptMem sizes for this memory. Uncomment a line to override it; an
-# absent line tracks the tool's default.
-#
-# WAKE_LINES=208     # the memory context: how many lines wake prints (~16k tokens)
-# ENTRY_CHARS=280    # the longest a single memory may be, in bytes
-# PART_CHARS=20000   # output paging: largest part, in bytes
-# PART_LINES=500     # output paging: largest part, in lines
-"""
-
 TEMPLATE = """\
 ## Memory
 
@@ -380,10 +456,8 @@ def cmd_init(d, args):
     fresh = not os.path.isdir(d)
     os.makedirs(os.path.join(d, "TREE"), exist_ok=True)
     open(log_path(d), "a").close()
-    cfg = os.path.join(d, "config")
-    if not os.path.exists(cfg):
-        with open(cfg, "w") as f:
-            f.write(CONFIG)
+    if not os.path.exists(os.path.join(d, "config")):
+        write_config(d, {})
     config(d)
     home = os.path.expanduser("~")
 
@@ -511,6 +585,29 @@ def cmd_sleep(d, args):
     print(("\n" if said else "") + nap)
 
 
+def cmd_config(d, args):
+    """Show this memory's sizes, or change one. An empty value restores the
+    default. Sizes only select what is printed, so changing one is free: no
+    memory is touched and nothing is recomputed."""
+    over = overrides(d)
+    for a in args:
+        k, eq, v = a.partition("=")
+        k = k.strip().upper()
+        if not eq or k not in KNOBS:
+            die("usage: memo config [NAME=VALUE ...]   # NAME one of %s"
+                % ", ".join(KNOBS))
+        if v.strip():
+            over[k] = size(k, v.strip())
+        else:
+            over.pop(k, None)
+    if args:
+        write_config(d, over)
+    for k, (default, what) in KNOBS.items():
+        print("%-12s %-7d %s%s" % (k, over.get(k, default), what,
+                                   "" if k not in over else
+                                   " (default %d)" % default))
+
+
 def cmd_forget(d, args):
     """A summary can be wrong -- mistyped, or a bad compression. Drop it and
     everything built on top of it; the next sleep computes them again. The log
@@ -599,7 +696,7 @@ def cmd_import(d, args):
 
 COMMANDS = {"init": cmd_init, "wake": cmd_wake, "note": cmd_note,
             "sleep": cmd_sleep, "recall": cmd_recall, "forget": cmd_forget,
-            "import": cmd_import}
+            "config": cmd_config, "import": cmd_import}
 
 
 def main():

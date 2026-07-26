@@ -32,28 +32,70 @@ background.
 
 ```
 ~/.optmem/
-  memo          the tool (Python 3, no dependencies)
-  blocks.py     which memories to read, and which to merge
+  memo          the tool: one file of Python 3, no dependencies
   memory/
     LOG.txt     every memory, one per line, append-only, never edited
     TREE/       the summaries: a cache, rebuildable from the log alone
-    config      the sizes, all commented out
+    config      the sizes, written by `memo config`
 ```
 
-`WAKE_LINES` is the only size worth touching: how many lines `wake` prints
-(208 ≈ 16k tokens). It is a reading budget, not a storage budget — change it
-whenever, in either direction, and nothing is recomputed.
+```sh
+memo config                  # show the sizes
+memo config WAKE_LINES=300   # how many lines wake prints (208 ≈ 16k tokens)
+memo config WAKE_LINES=      # back to the default
+```
+
+`WAKE_LINES` is the only size worth touching, and it is a reading budget, not
+a storage budget: change it whenever, in either direction, and nothing is
+recomputed.
 
 Records are fixed width, so position *is* identity and every lookup is one
 seek. At a million memories (607 MB), `wake` takes 0.03s.
 
 Set `$MEMORY_DIR` to keep `memory/` elsewhere — a synced folder, a git repo.
 
-## Limitations
+## The prompt
 
-Recency is the only axis: an old memory fades however important it was, and
-the one defence is rehearsal — note it again and it is recent again. `recall`
-is regex, not semantic search. Summaries are written by the agent out of other
-summaries, so a bad one spreads upward until you `forget` it. And a wake costs
-~16k tokens, which is deliberate but not free. If you need a fact database,
-use a wiki — this is for *who the agent is*.
+This is what the installer prints, and the whole of the integration.
+
+```markdown
+## Memory
+
+Your memory is OptMem:
+- The tool is `~/.optmem/memo`
+- The data is `~/.optmem/memory`
+
+OptMem survives every new session, every compaction and every change
+of model or vendor. Without it you do not know who you are, or what
+was already decided and tried.
+
+### At startup: activating OptMem (mandatory)
+
+Run `~/.optmem/memo wake` before any other tool call, in every session.
+It prints in numbered parts, each ordering the next; run every one until
+a part says `You are awake.` Do not stop early: part 1 is your distant
+past, the last part is this week. If wake refuses because compressions
+are pending, do them and run `~/.optmem/memo wake` again.
+
+### While working: register memories (mandatory)
+
+Call `~/.optmem/memo note "<1 line, max 280 chars>"` whenever you learn
+something new, or something worth keeping happens. That covers a task
+worth real effort, a fact or insight the user teaches you, anything you
+learn about their life (even indirectly), any event of lasting effect.
+
+Do not register redundant memories.
+
+If `~/.optmem/memo note` asks a compression: do it before your next action.
+
+Use `~/.optmem/memo recall <regex>` when a memory you need is too vague.
+
+Never edit or delete anything under `~/.optmem/memory`: the tool manages it.
+
+### If you're a subagent: skip everything above
+
+Parallel sessions on this machine are all you, and may all write memories.
+A subagent is not: it must never run `memo`, because it cannot judge what
+is already known, and its notes would arrive duplicated and incorrectly.
+Start every brief you send one with `You are a subagent. Don't run memo.`
+```
