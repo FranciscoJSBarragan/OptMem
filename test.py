@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AmalgaMem invariants, checked against a synthetic life of 5000 memories.
+"""OptMem invariants, checked against a synthetic life of 5000 memories.
 
 Uses a fake compressor (join + truncate) so the run is deterministic and free.
 """

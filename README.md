@@ -1,4 +1,4 @@
-# AmalgaMem
+# OptMem
 
 How do you make an AI agent remember its whole life?
 
@@ -9,9 +9,9 @@ How do you make an AI agent remember its whole life?
    grow with age; a memory that scrolls past it might as well not exist.
 
 Most agent memories pick one: keep everything (and drown), or keep a small
-curated file (and forget). AmalgaMem does both. *At once.*
+curated file (and forget). OptMem does both. *At once.*
 
-[![watch the animation](anim/poster.png)](anim/amalgamem.mp4)
+[![watch the animation](anim/poster.png)](anim/optmem.mp4)
 
 *↑ click to watch: 3 minutes, the whole idea.*
 
@@ -93,8 +93,8 @@ a memory.
 ## Setup
 
 ```sh
-git clone https://github.com/VictorTaelin/AmalgaMem ~/AmalgaMem
-~/AmalgaMem/memo init
+git clone https://github.com/VictorTaelin/OptMem ~/OptMem
+~/OptMem/memo init
 ```
 
 `memo init` creates `~/memory` — this machine's identity — and prints a
@@ -105,31 +105,31 @@ everything else on its own. The block:
 ```markdown
 ## Memory
 
-Your memory is AmalgaMem: the tool is `~/AmalgaMem/memo`, the data is `~/memory`.
+Your memory is OptMem: the tool is `~/OptMem/memo`, the data is `~/memory`.
 It survives every new session, every compaction and every change of
 model or vendor. Without it you do not know who you are, or what was
 already decided and tried.
 
-Run `~/AmalgaMem/memo wake` before any other tool call, in every session. It prints
+Run `~/OptMem/memo wake` before any other tool call, in every session. It prints
 in numbered parts, each ordering the next; run every one until a part
 says `You are awake.` Do not stop early: part 1 is your distant past,
 the last part is this week. If wake refuses because compressions are
-pending, do them and run `~/AmalgaMem/memo wake` again.
+pending, do them and run `~/OptMem/memo wake` again.
 
 While you work:
 
-- `~/AmalgaMem/memo note "<one line, max 280 chars>"` the moment something happens,
+- `~/OptMem/memo note "<one line, max 280 chars>"` the moment something happens,
   you learn something, or something changes -- if and only if it is new
   to you, important, and lasting in effect. That covers a task worth
   real effort, a fact or insight your user teaches you, anything you
   learn about their life (even indirectly), and work of yours that
   lands. Never write what you already know: no redundant memories, ever.
-- If `~/AmalgaMem/memo note` returns a compression, do it before your next action.
-- `~/AmalgaMem/memo recall <regex>` when a memory is too vague.
-- Before your context ends, run `~/AmalgaMem/memo sleep` and answer each prompt
+- If `~/OptMem/memo note` returns a compression, do it before your next action.
+- `~/OptMem/memo recall <regex>` when a memory is too vague.
+- Before your context ends, run `~/OptMem/memo sleep` and answer each prompt
   until it prints `Nothing left to compress.`
-- Never create, edit or delete anything under `~/memory`. Only the tool
-  writes there.
+- Never create, edit or delete anything under `~/memory`:
+  only the tool writes there.
 
 Parallel sessions on this machine are all you, and may all write
 memories. A subagent is not: it must never run `memo`, because it cannot
@@ -139,7 +139,7 @@ subagent. Do not run memo.` If your own first message is a task brief
 from another agent, you are that subagent: skip this section.
 ```
 
-That is the whole integration. AmalgaMem is just prompts and scripts: no
+That is the whole integration. OptMem is just prompts and scripts: no
 daemon, no database, no embeddings, no API. It works the same under Claude
 Code, Codex, pi, or a human at a shell.
 
@@ -227,7 +227,7 @@ ever rewritten.
 
 ## Limitations
 
-AmalgaMem is honest about what it is. Recency is the only axis: an important
+OptMem is honest about what it is. Recency is the only axis: an important
 old fact fades into its block like everything else, and the defence is
 rehearsal — noting it again refreshes it. `recall` is regex over plain text,
 not semantic search; the memory context is what tells you what to search

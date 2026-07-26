@@ -1,5 +1,5 @@
 "use strict";
-// AmalgaMem explainer.
+// OptMem explainer.
 // Rules: a screen is EITHER one sentence OR one picture, never both.
 // One new thing per beat, held long enough to read it out loud twice.
 // Pacing lives here: [kind, seconds, ...]; "co" = continue, no cut to white.
@@ -33,7 +33,7 @@ const BEATS = [
           "(Hermes caps it at 2,200 characters)"],
   ["prune", 5.2],
   ["say", "_PROBLEM:_", "you cannot tell *today*", "what will matter in a *year*"],
-  ["say", "+OUR ANSWER:+", "AmalgaMem +deletes nothing+"],
+  ["say", "+OUR ANSWER:+", "OptMem +deletes nothing+"],
   ["say", "two memories +merge+ into one", punch],
   ["merge", 6.8],
   ["say", "the result is a memory too", "it just holds *less detail*"],
@@ -50,7 +50,7 @@ const BEATS = [
   ["say", "the *memory context* +never grows+", "and *you* choose its size"],
   ["say", "nothing is ever deleted", "the originals are all +still there+"],
   ["recall", 6.8],
-  ["say", "nothing to run, nothing to host", "AmalgaMem is just some prompts and scripts",
+  ["say", "nothing to run, nothing to host", "OptMem is just some prompts and scripts",
           "it works in any harness, any environment", "just point your *AGENTS.md* to it, and done"],
   ["end", 6.5],
 ];
@@ -648,13 +648,13 @@ S.recall = (u, dur) => {
 };
 
 S.end = (u, dur) => {
-  T("AmalgaMem", W/2, 284, 58, INK, "center", true);
+  T("OptMem", W/2, 284, 58, INK, "center", true);
   cx.globalAlpha = ease((u - 0.6)/0.5);
   T("an append-only log + a binary merge tree", W/2, 356, 23, GREEN, "center");
   T("detail fades with age \u00b7 nothing is deleted", W/2, 396, 23, DIM, "center");
   cx.globalAlpha = ease((u - 1.6)/0.5);
   T("~600 lines of Python \u00b7 no database \u00b7 no embeddings", W/2, 462, 19, FAINT, "center");
-  T("github.com/VictorTaelin/AmalgaMem", W/2, 508, 21, "#1a5fd0", "center");
+  T("github.com/VictorTaelin/OptMem", W/2, 508, 21, "#1a5fd0", "center");
   cx.globalAlpha = 1;
 };
 

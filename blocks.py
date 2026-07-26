@@ -1,4 +1,4 @@
-"""Block math for AmalgaMem.
+"""Block math for OptMem.
 
 A BLOCK is an aligned power-of-two range of memories, [lo, hi), written as one
 line of at most ENTRY_CHARS characters. Blocks form a binary merge tree over

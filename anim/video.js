@@ -1,4 +1,4 @@
-// Renders the AmalgaMem animation to PNG frames. Usage:
+// Renders the OptMem animation to PNG frames. Usage:
 //   node video.js            all frames at 30fps into frames/
 //   node video.js 3 9 26 40  single stills at those seconds into shots/
 const { createCanvas } = require("canvas");
@@ -24,5 +24,5 @@ if (args.length) {
     fs.writeFileSync(`frames/${String(f).padStart(5, "0")}.png`, cv.toBuffer("image/png"));
     if (f % 300 === 0) console.log(`${f}/${N}`);
   }
-  console.log("done. now: ffmpeg -framerate 30 -i frames/%05d.png -c:v libx264 -pix_fmt yuv420p -crf 18 amalgamem.mp4");
+  console.log("done. now: ffmpeg -framerate 30 -i frames/%05d.png -c:v libx264 -pix_fmt yuv420p -crf 18 optmem.mp4");
 }

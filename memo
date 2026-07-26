@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AmalgaMem: a permanent, append-only memory for AI agents.
+"""OptMem: a permanent, append-only memory for AI agents.
 
   memo init                create this machine's memory, print the setup block.
   memo wake [part [T]]     read your memory. Run first, every session.
@@ -319,7 +319,7 @@ def next_nap(d, T):
 # ---------------------------------------------------------------- commands
 
 CONFIG = """\
-# AmalgaMem sizes for this memory. Uncomment a line to override it; an
+# OptMem sizes for this memory. Uncomment a line to override it; an
 # absent line tracks the tool's default.
 #
 # WAKE_LINES=208     # the memory context: how many lines wake prints (~16k tokens)
@@ -331,7 +331,7 @@ CONFIG = """\
 TEMPLATE = """\
 ## Memory
 
-Your memory is AmalgaMem: the tool is `{tool}`, the data is `{data}`.
+Your memory is OptMem: the tool is `{tool}`, the data is `{data}`.
 It survives every new session, every compaction and every change of
 model or vendor. Without it you do not know who you are, or what was
 already decided and tried.
@@ -354,8 +354,8 @@ While you work:
 - `{memo} recall <regex>` when a memory is too vague.
 - Before your context ends, run `{memo} sleep` and answer each prompt
   until it prints `Nothing left to compress.`
-- Never create, edit or delete anything under `{data}`. Only the tool
-  writes there.
+- Never create, edit or delete anything under `{data}`:
+  only the tool writes there.
 
 Parallel sessions on this machine are all you, and may all write
 memories. A subagent is not: it must never run `memo`, because it cannot
