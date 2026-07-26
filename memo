@@ -9,14 +9,13 @@
   memo forget <lo>-<hi>    drop a bad summary; sleep rebuilds it.
   memo import <file>       bulk-load dated memories (bootstrap only).
 
-Everything lives in ~/memory, or in $MEMORY_DIR if set. See README.md.
+The memories live in ~/.optmem/memory, or in $MEMORY_DIR if set. See README.md.
 """
 
 import datetime
 import fcntl
 import os
 import re
-import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -45,7 +44,7 @@ TREE_REC = 288
 # ---------------------------------------------------------------- store
 
 def memory_dir():
-    return os.path.expanduser(os.environ.get("MEMORY_DIR") or "~/memory")
+    return os.path.expanduser(os.environ.get("MEMORY_DIR") or "~/.optmem/memory")
 
 
 def store():
@@ -331,38 +330,43 @@ CONFIG = """\
 TEMPLATE = """\
 ## Memory
 
-Your memory is OptMem: the tool is `{tool}`, the data is `{data}`.
-It survives every new session, every compaction and every change of
-model or vendor. Without it you do not know who you are, or what was
-already decided and tried.
+Your memory is OptMem:
+- The tool is `{memo}`
+- The data is `{data}`
 
-Run `{memo} wake` before any other tool call, in every session. It prints
-in numbered parts, each ordering the next; run every one until a part
-says `You are awake.` Do not stop early: part 1 is your distant past,
-the last part is this week. If wake refuses because compressions are
-pending, do them and run `{memo} wake` again.
+OptMem survives every new session, every compaction and every change
+of model or vendor. Without it you do not know who you are, or what
+was already decided and tried.
 
-While you work:
+### At startup: activating OptMem (mandatory)
 
-- `{memo} note "<one line, max {chars} chars>"` the moment something happens,
-  you learn something, or something changes -- if and only if it is new
-  to you, important, and lasting in effect. That covers a task worth
-  real effort, a fact or insight your user teaches you, anything you
-  learn about their life (even indirectly), and work of yours that
-  lands. Never write what you already know: no redundant memories, ever.
-- If `{memo} note` returns a compression, do it before your next action.
-- `{memo} recall <regex>` when a memory is too vague.
-- Before your context ends, run `{memo} sleep` and answer each prompt
-  until it prints `Nothing left to compress.`
-- Never create, edit or delete anything under `{data}`:
-  only the tool writes there.
+Run `{memo} wake` before any other tool call, in every session.
+It prints in numbered parts, each ordering the next; run every one until
+a part says `You are awake.` Do not stop early: part 1 is your distant
+past, the last part is this week. If wake refuses because compressions
+are pending, do them and run `{memo} wake` again.
 
-Parallel sessions on this machine are all you, and may all write
-memories. A subagent is not: it must never run `memo`, because it cannot
-judge what is already known and its notes would arrive duplicated and at
-the wrong grain. Start every brief you send one with `You are a
-subagent. Do not run memo.` If your own first message is a task brief
-from another agent, you are that subagent: skip this section.
+### While working: register memories (mandatory)
+
+Call `{memo} note "<1 line, max {chars} chars>"` whenever you learn
+something new, or something worth keeping happens. That covers a task
+worth real effort, a fact or insight the user teaches you, anything you
+learn about their life (even indirectly), any event of lasting effect.
+
+Do not register redundant memories.
+
+If `{memo} note` asks a compression: do it before your next action.
+
+Use `{memo} recall <regex>` when a memory you need is too vague.
+
+Never edit or delete anything under `{data}`: the tool manages it.
+
+### If you're a subagent: skip everything above
+
+Parallel sessions on this machine are all you, and may all write memories.
+A subagent is not: it must never run `memo`, because it cannot judge what
+is already known, and its notes would arrive duplicated and incorrectly.
+Start every brief you send one with `You are a subagent. Don't run memo.`
 """
 
 
@@ -381,15 +385,13 @@ def cmd_init(d, args):
         with open(cfg, "w") as f:
             f.write(CONFIG)
     config(d)
-    home = os.path.realpath(os.path.expanduser("~"))
+    home = os.path.expanduser("~")
 
     def pretty(p):
-        p = os.path.realpath(p)
+        # as the user would type it: keep symlinks, fold $HOME to ~
+        p = os.path.abspath(p)
         return "~" + p[len(home):] if p.startswith(home + os.sep) else p
 
-    tool = os.path.realpath(__file__)
-    found = shutil.which("memo")
-    memo = "memo" if found and os.path.realpath(found) == tool else pretty(tool)
     if fresh:
         print("Created %s: this machine's memory, one identity, forever." % pretty(d))
     else:
@@ -398,7 +400,7 @@ def cmd_init(d, args):
     print()
     print("Paste this at the top of your agent's AGENTS.md (or CLAUDE.md), done:")
     print()
-    print(TEMPLATE.format(tool=pretty(tool), memo=memo, data=pretty(d),
+    print(TEMPLATE.format(memo=pretty(__file__), data=pretty(d),
                           chars=ENTRY_CHARS).rstrip())
 
 

@@ -135,18 +135,18 @@ check(ghost.returncode == 1 and "No memory at" in ghost.stderr,
       "a missing MEMORY_DIR was created instead of reported")
 check(not os.path.exists(d + "-typo"), "a missing MEMORY_DIR was created")
 
-# the fresh-user path: no MEMORY_DIR, wake refuses, init creates ~/memory,
+# the fresh-user path: no MEMORY_DIR, wake refuses, init creates the memory,
 # prints the paste block, and is idempotent
 fresh = {k: v for k, v in os.environ.items() if k != "MEMORY_DIR"}
 fresh["HOME"] = tempfile.mkdtemp()
 noenv = subprocess.run(memo + ["wake"], capture_output=True, text=True, env=fresh)
 check(noenv.returncode == 1 and "memo init" in noenv.stderr,
-      "with no MEMORY_DIR and no ~/memory, wake must point at init")
+      "with no MEMORY_DIR and no memory, wake must point at init")
 init = subprocess.run(memo + ["init"], capture_output=True, text=True, env=fresh)
 check(init.returncode == 0 and "## Memory" in init.stdout
       and "You are a" in init.stdout, "init must print the AGENTS.md block")
-check(os.path.exists(os.path.join(fresh["HOME"], "memory", "config")),
-      "init must create ~/memory with its config")
+check(os.path.exists(os.path.join(fresh["HOME"], ".optmem", "memory", "config")),
+      "init must create ~/.optmem/memory with its config")
 again = subprocess.run(memo + ["init"], capture_output=True, text=True, env=fresh)
 check(again.returncode == 0 and "Found" in again.stdout, "init must be idempotent")
 woke = subprocess.run(memo + ["wake"], capture_output=True, text=True, env=fresh)
