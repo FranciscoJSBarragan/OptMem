@@ -386,7 +386,8 @@ def nap_prompt(d, lo, hi, left):
         "1 compression remains" if left == 1 else
         "%d compressions remain" % left)
     return ("Compress memories #%d-%d into one line of at most %d characters.\n"
-            "Drop wording, not facts. Invent nothing.\n\n"
+            "Keep what has lasting effect, drop what does not. Invent "
+            "nothing.\n\n"
             "%s\n%s\n"
             "Run: memo sleep %d-%d \"<your line>\""
             % (lo, hi - 1, ENTRY_CHARS, body, tail, lo, hi - 1))
