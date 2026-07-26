@@ -1,6 +1,6 @@
 # OptMem
 
-Permanent memory for AI agents. No database: a prompt and a script, plug and play.
+Permanent memory for AI agents. A 335-token prompt, a script, plug and play.
 
 ![how OptMem works](anim/optmem.gif)
 
