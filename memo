@@ -6,7 +6,7 @@
   {memo} note "..."       record one memory: one short line.
   {memo} nap [id "..."]   do the pending compressions.
   {memo} recall <regex>   search every memory ever recorded.
-  {memo} zoom [<lo>-<hi>] open a block into its finer parts.
+  {memo} zoom <lo>-<hi>   open a tree node: its two halves.
   {memo} forget <lo>-<hi> drop a bad summary; nap rebuilds it.
   {memo} config [NAME=N]  show this memory's sizes, or change one.
   {memo} import <file>    bulk-load dated memories (bootstrap only).
@@ -51,10 +51,7 @@ ENTRY_CHARS = KNOBS["ENTRY_CHARS"][0]
 PART_CHARS = KNOBS["PART_CHARS"][0]
 PART_LINES = KNOBS["PART_LINES"][0]
 
-# The grain of the tree as an agent sees it: a block of at most this many
-# memories is shown as raw memories, a bigger one as this many children. So a
-# nap prompt, and a zoom, are never more than RAW_MAX lines.
-RAW_MAX = 16
+RAW_MAX = 16  # blocks up to this many memories compress from the raw log
 
 
 # Records are FIXED WIDTH, so a memory or a block is found by seeking to its
@@ -489,10 +486,10 @@ Never edit or delete anything under `{data}`: the tool manages it.
 
 `{memo} recall <regex>` searches every memory, word for word.
 
-Your memories are also a tree: every 2, 4, 8 ... consecutive ones exist as
-one summary, so each `#a-b` line wake printed is a whole era in one line.
-`{memo} zoom <a-b>` opens an era into finer parts, and again, down to
-the raw memories. `{memo} zoom` alone opens the tree from the top.
+Your memories also form a binary tree: #0-1, #2-3 ... exist as one-line
+summaries, pairs of those as #0-3, and so on -- every `#a-b` line wake
+prints is one node of it. `{memo} zoom <a-b>` opens a node into its
+two halves, down to the raw memories.
 
 ### If you're a subagent: skip everything above
 
@@ -721,26 +718,21 @@ def cmd_recall(d, args):
 
 
 def cmd_zoom(d, args):
-    """Open one block into its finer parts. `recall` finds the words an agent
-    remembers; this finds the memory it does not, by descending the tree from
-    an era to a day. Five zooms reach any memory of a million."""
-    if len(args) > 1:
-        die("usage: %s zoom [<lo>-<hi>]   # a block id, as wake prints them"
+    """One node of the tree, opened: its two halves, each rendered as wake
+    renders it -- a summary, or the raw memory once a half is single. The
+    navigating intelligence is the agent's; the tool only reads."""
+    if len(args) != 1:
+        die("usage: %s zoom <lo>-<hi>   # a block id, as wake prints them"
             % ME)
+    lo, hi = block_id(args[0])
     T = log_len(d)
-    if not T:
-        die("No memories yet. Record the first with: %s note \"<one line>\""
-            % ME)
-    if not args:
-        kids = cover(T, RAW_MAX)  # the whole life, coarsest: where to start
-    else:
-        lo, hi = block_id(args[0])
-        if lo >= T:
-            die("#%d-%d is beyond the memory: it holds %s. Run: %s wake"
-                % (lo, hi - 1, plural(T, "memory"), ME))
-        step = (hi - lo) // RAW_MAX or 1
-        kids = [(k, k + step) for k in range(lo, hi, step) if k < T]
-    for a, b in kids:
+    if lo >= T:
+        die("#%s is beyond the memory: it holds %s. Run: %s wake"
+            % (args[0], plural(T, "memory"), ME))
+    mid = (lo + hi) // 2
+    for a, b in ((lo, mid), (mid, hi)):
+        if a >= T:
+            continue  # the future: no memories there yet
         if b - a == 1:
             print("#%d %s %s" % log_get(d, a))
         else:

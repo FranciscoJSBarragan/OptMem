@@ -301,46 +301,46 @@ check("#7 " in r.stdout and "5 matches." in r.stdout,
       "recall cannot find memories by date: " + r.stdout)
 
 
-# zoom: the agent must be able to walk from the whole life down to one day
-# without reading the store itself. Every view is a contiguous tiling of the
-# block it opened, so at each step exactly one line can hold what is wanted.
-def view(*args):
-    r = run("zoom", *args)
-    check(r.returncode == 0, "zoom %s failed: %s" % (args, r.stderr))
-    check(len(r.stdout) < CAP_CHARS, "a zoom returned %d chars" % len(r.stdout))
+# zoom: one tree node, opened into its two halves. The tool only reads;
+# the agent is the navigator: it descends from a wake line by halving, and
+# may leap to any block id it can name.
+def halves(bid):
+    r = run("zoom", bid)
+    check(r.returncode == 0, "zoom %s failed: %s" % (bid, r.stderr))
     out = []
     for line in r.stdout.splitlines():
         m = re.match(r"#(\d+)(?:-(\d+))? ", line)
         check(bool(m), "zoom printed a line with no id: %r" % line)
-        lo = int(m.group(1))
-        out.append((lo, int(m.group(2)) + 1 if m.group(2) else lo + 1))
-    check(len(out) <= cli.RAW_MAX, "a zoom printed %d lines" % len(out))
+        a = int(m.group(1))
+        out.append((a, int(m.group(2)) + 1 if m.group(2) else a + 1))
     return out
 
 
-target, steps, lo, hi = 1234, 0, 0, N
-cur = view()
-while True:
-    check(cur[0][0] == lo and cur[-1][1] >= min(hi, N),
-          "zoom %d-%d did not tile its block: %r" % (lo, hi - 1, cur))
-    for a, b in zip(cur, cur[1:]):
-        check(a[1] == b[0], "zoom left a gap or an overlap: %r" % (cur,))
-    holds = [b for b in cur if b[0] <= target < b[1]]
-    check(len(holds) == 1, "#%d is in %d of the lines zoom printed"
-          % (target, len(holds)))
-    lo, hi = holds[0]
-    if hi - lo == 1:
-        break
-    steps += 1
-    check(steps <= 4, "zoom needed %d steps to reach one of %d memories"
-          % (steps, N))
-    cur = view("%d-%d" % (lo, hi - 1))
-check(lo == target, "the descent landed on #%d, not #%d" % (lo, target))
-check("memory number %d," % target in run("zoom", "1232-1235").stdout,
-      "a zoom of the finest blocks must print the raw memories")
+target, lo, hi, calls = 777, 0, 1024, 0
+while hi - lo > 1:
+    mid = (lo + hi) // 2
+    kids = halves("%d-%d" % (lo, hi - 1))
+    check(kids == [(lo, mid), (mid, hi)],
+          "zoom %d-%d is not its two halves: %r" % (lo, hi - 1, kids))
+    lo, hi = kids[target >= mid]
+    calls += 1
+check(lo == target and calls == 10,
+      "halving 1024 memories took %d calls and landed on #%d" % (calls, lo))
+check("memory number %d," % target in run("zoom", "776-777").stdout,
+      "the last zoom must print the raw memories themselves")
 
-# a block id that is not one, and a block the memory has not reached yet
+# the unbuilt tail is named, the empty future is omitted
+r = run("zoom", "1024-2047")  # T is N+1, so the right half has no summary
+check("#1536-2047 not compressed yet" in r.stdout,
+      "an unbuilt half must say so: " + r.stdout)
+r = run("zoom", "%d-%d" % (N, N + 1))  # the newest memory + one not yet made
+check(r.stdout.count("\n") == 1 and "#%d " % N in r.stdout,
+      "a half beyond the newest memory must be omitted: " + r.stdout)
+
+# zoom answers with the tree's own records, so the id must BE a node
 check(run("zoom", "3-9").returncode == 1, "zoom accepted a non-block")
+check(run("zoom", "9-3").returncode == 1, "zoom accepted a backwards range")
+check(run("zoom").returncode == 1, "zoom with no id must show usage")
 r = run("zoom", "1048576-2097151")
 check(r.returncode == 1 and "beyond the memory" in r.stderr
       and "memo wake" in r.stderr, "zoom past the end must name a way back")
@@ -382,7 +382,7 @@ check(treesize() == before, "tree did not return to its original size")
 check(run("forget", "17-32").returncode == 1, "forgetting a non-block should fail")
 # a summary that is not built yet is named as such, never left blank
 run("forget", "16-31")
-z = run("zoom", "0-255").stdout
+z = run("zoom", "0-31").stdout
 check("#16-31 not compressed yet" in z, "zoom hid a missing summary: " + z)
 while True:
     bid = nap_id(run("nap").stdout)
