@@ -386,7 +386,6 @@ def nap_prompt(d, lo, hi, left):
         "1 compression remains" if left == 1 else
         "%d compressions remain" % left)
     return ("Compress memories #%d-%d into one line of at most %d characters.\n"
-            "Keep every name, number, date, decision and outcome.\n"
             "Drop wording, not facts. Invent nothing.\n\n"
             "%s\n%s\n"
             "Run: memo sleep %d-%d \"<your line>\""
@@ -531,7 +530,10 @@ def cmd_wake(d, args):
         die("No part %d: the memory has %s. Run: memo wake"
             % (k, plural(len(parts), "part")))
     if len(parts) > 1:
-        print("Your memory, part %d of %d, oldest first." % (k, len(parts)))
+        # The count is here so the T in `memo wake 2 296` reads as what it
+        # is: the snapshot this document was written from.
+        print("Your memory, part %d of %d, oldest first (%s)."
+              % (k, len(parts), plural(T, "memory")))
     print("\n".join(parts[k - 1]))
     if k < len(parts):
         # This footer is the only instruction that survives every harness's
