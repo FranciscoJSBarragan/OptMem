@@ -14,8 +14,7 @@ It prints a `## Memory` block. Paste that at the top of your agent's
 `AGENTS.md` (or `CLAUDE.md`), and you are done. Run the same line again to
 update.
 
-The tool lands at `~/.optmem/memo`. Put `~/.optmem` on your `PATH` to type
-`memo` for short, as the rest of this page does.
+The tool lands at `~/.optmem/memo`; put `~/.optmem` on `PATH` to type `memo`.
 
 ## Commands
 
