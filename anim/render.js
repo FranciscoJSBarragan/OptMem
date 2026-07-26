@@ -228,7 +228,7 @@ function ageOf(lo, hi, n) {
   return "~" + (d/365).toFixed(1) + " years ago";
 }
 
-// ------------------------------------------------------- cover (blocks.py)
+// ----------------------------------------------- cover (a port of ../memo)
 function tiles(t, a) {
   let root = 1; while (root < t) root *= 2;
   const out = [], st = [[0, root]];

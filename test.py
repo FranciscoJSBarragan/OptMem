@@ -163,6 +163,42 @@ woke = subprocess.run(memo + ["wake"], capture_output=True, text=True, env=fresh
 check(woke.returncode == 0 and "You are awake." in woke.stdout,
       "after init, wake must work with zero configuration")
 
+# Every command the tool prints must RUN on the machine it printed it on.
+# `curl | sh` puts nothing on PATH, so a bare `memo nap ...` would not: the
+# whole loop (note -> merge prompt -> nap) dies on `command not found`.
+bare = dict(fresh, PATH="/usr/bin:/bin")
+subprocess.run(memo + ["note", "the first thing that happened"], env=bare,
+               capture_output=True)
+asked = subprocess.run(memo + ["note", "the second thing that happened"],
+                       env=bare, capture_output=True, text=True)
+order = [l[5:] for l in asked.stdout.splitlines() if l.startswith("Run: ")]
+check(len(order) == 1, "note did not order a compression: " + asked.stdout)
+obeyed = subprocess.run(order[0].replace('"<your line>"', '"both things"'),
+                        shell=True, env=bare, capture_output=True, text=True)
+check(obeyed.returncode == 0 and "saved" in obeyed.stdout,
+      "the order the tool printed does not run with nothing on PATH: %r -> %s"
+      % (order[0], obeyed.stderr.strip()))
+
+# a size written by hand into `config` must not brick the tool with a
+# recovery that is itself broken: name the file and the line
+badcfg = os.path.join(fresh["HOME"], ".optmem", "memory", "config")
+with open(badcfg, "a") as f:
+    f.write("WAKE_LNES = 100\n")
+for c in (["wake"], ["config"]):
+    r_ = subprocess.run(memo + c, capture_output=True, text=True, env=fresh)
+    check(r_.returncode == 1 and "config line" in r_.stderr
+          and "WAKE_LNES" in r_.stderr,
+          "a typo in config does not say where it is: " + r_.stderr)
+open(badcfg, "w").write("")
+
+# the filesystem is the one thing the tool does not control: report it in the
+# tool's own voice, never as a Python traceback
+r_ = subprocess.run(memo + ["init"], capture_output=True, text=True,
+                    env=dict(fresh, MEMORY_DIR=MEMO))   # a file, not a store
+check(r_.returncode == 1 and "Traceback" not in r_.stderr
+      and "Not a directory" in r_.stderr,
+      "a filesystem error printed a traceback: " + r_.stderr)
+
 
 r = run("note", "x" * 281)
 check(r.returncode == 1 and "Too long" in r.stderr, "over-long note accepted")
@@ -188,7 +224,7 @@ check(not os.path.exists(os.path.join(d, "config")),
 r = run("wake")
 check(r.returncode == 1 and "Cannot wake" in r.stdout,
       "wake must refuse while work is pending")
-check("run memo wake again" in r.stdout,
+check("wake again" in r.stdout,
       "the refusal must order the agent back to wake")
 check("None" not in r.stdout, "the refusal printed a Python None")
 
@@ -233,7 +269,7 @@ lines = [l for p in parts for l in p]
 check(len(lines) == WAKE_LINES, "woke with %d lines, want %d" % (len(lines), WAKE_LINES))
 check(lines[-1].startswith("#%d " % (N - 1)), "newest memory not last / not raw")
 check(lines[0].startswith("#0-"), "oldest line should be a summary block")
-check("Run: memo wake 2" in run("wake").stdout,
+check(re.search(r"Run: \S*memo wake 2", run("wake").stdout),
       "part 1 must ORDER the next command, not label it")
 check("You are awake." in run("wake", str(len(parts))).stdout,
       "last part must say it is last")

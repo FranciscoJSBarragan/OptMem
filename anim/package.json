@@ -1,14 +1,7 @@
 {
-  "name": "anim",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "name": "optmem-anim",
+  "private": true,
+  "description": "Renders the OptMem explainer: render.js is the film, video.js writes the frames.",
   "type": "commonjs",
   "dependencies": {
     "canvas": "^3.2.3"

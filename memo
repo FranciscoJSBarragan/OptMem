@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """OptMem: a permanent, append-only memory for AI agents.
 
-  memo init                create this machine's memory, print the setup block.
-  memo wake [part [T]]     read your memory. Run first, every session.
-  memo note "..."          record one memory: one short line.
-  memo nap [id "..."]      do the pending compressions.
-  memo recall <regex>      search every memory ever recorded.
-  memo forget <lo>-<hi>    drop a bad summary; nap rebuilds it.
-  memo config [NAME=N]     show this memory's sizes, or change one.
-  memo import <file>       bulk-load dated memories (bootstrap only).
+  {memo} init             create this memory; print the setup block.
+  {memo} wake [part [T]]  read your memory. Run first, every session.
+  {memo} note "..."       record one memory: one short line.
+  {memo} nap [id "..."]   do the pending compressions.
+  {memo} recall <regex>   search every memory ever recorded.
+  {memo} forget <lo>-<hi> drop a bad summary; nap rebuilds it.
+  {memo} config [NAME=N]  show this memory's sizes, or change one.
+  {memo} import <file>    bulk-load dated memories (bootstrap only).
 
-The memories live in ~/.optmem/memory, or in $MEMORY_DIR if set. See README.md.
+The memories live in ~/.optmem/memory, or in $MEMORY_DIR if set.
+See github.com/VictorTaelin/OptMem.
 """
 
 import datetime
@@ -18,6 +19,18 @@ import fcntl
 import os
 import re
 import sys
+from collections import deque
+
+
+def pretty(p):
+    """A path as the user would type it: keep symlinks, fold $HOME to ~."""
+    p, home = os.path.abspath(p), os.path.expanduser("~")
+    return "~" + p[len(home):] if p.startswith(home + os.sep) else p
+
+
+# Every command this tool prints has to RUN. After `curl | sh` nothing is on
+# PATH, so a bare `memo nap 0-1 "..."` would not: the tool names itself.
+ME = pretty(__file__)
 
 # The sizes a memory may override in its own `config` file: the default, and
 # what it means. `memo config` shows and edits them. The globals below start
@@ -120,8 +133,8 @@ def store():
     # store, and the agent would wake with no past and write a second
     # identity.
     if not os.path.isdir(d):
-        die("No memory at %s.\nTo create one, run: memo init\n"
-            "To use an existing one, point MEMORY_DIR at it." % d)
+        die("No memory at %s.\nTo create one, run: %s init\n"
+            "To use an existing one, point MEMORY_DIR at it." % (d, ME))
     os.makedirs(os.path.join(d, "TREE"), exist_ok=True)
     p = os.path.join(d, "LOG.txt")
     if not os.path.exists(p):
@@ -129,14 +142,16 @@ def store():
     return d
 
 
-def size(k, v):
-    """Validate one knob, wherever it came from: the config file or argv."""
+def size(k, v, where=""):
+    """Validate one knob, wherever it came from: the config file or argv. A
+    bad knob stops every command, so the message has to say where it is
+    written -- `memo config` cannot fix a file it also refuses to read."""
     if not v.isdigit() or int(v) < 1:
-        die("%s must be a positive whole number, not '%s'." % (k, v))
+        die("%s%s must be a positive whole number, not '%s'." % (where, k, v))
     top = min(TREE_REC - 8, LOG_REC - 40)
     if k == "ENTRY_CHARS" and int(v) > top:
-        die("ENTRY_CHARS is at most %d: a memory has to fit the fixed-width "
-            "records." % top)
+        die("%sENTRY_CHARS is at most %d: a memory has to fit the fixed-width "
+            "records." % (where, top))
     return int(v)
 
 
@@ -146,14 +161,17 @@ def overrides(d):
     p = os.path.join(d, "config")
     if not os.path.exists(p):
         return out
-    for line in open(p):
+    for n, line in enumerate(open(p), 1):
         line = line.split("#")[0].strip()
         if "=" not in line:
             continue
-        k, v = (s.strip() for s in line.split("=", 1))
+        k, v = line.split("=", 1)
+        k, v = k.strip().upper(), v.strip()
+        where = "%s line %d: " % (pretty(p), n)
         if k not in KNOBS:
-            die("config: %s is not a size. Run: memo config" % k)
-        out[k] = size(k, v)
+            die("%s%s is not a size. Delete the line, or name one of: %s."
+                % (where, k, ", ".join(KNOBS)))
+        out[k] = size(k, v, where)
     return out
 
 
@@ -168,7 +186,7 @@ def write_config(d, over):
     """Rewrite `config`: every knob on its own line, commented out unless this
     memory overrides it."""
     out = ["# OptMem sizes for this memory. A commented line means: follow the",
-           "# tool's default. Edit with `memo config NAME=VALUE`.", ""]
+           "# tool's default. Edit with `%s config NAME=VALUE`." % ME, ""]
     for k, (default, what) in KNOBS.items():
         out.append("%-2s%-12s = %-6d # %s"
                    % ("" if k in over else "# ", k, over.get(k, default), what))
@@ -214,22 +232,36 @@ def parse(line):
     return int(head[1:]), date, text
 
 
-def log_get(d, i):
-    """(id, date, text) of memory i, in one seek."""
-    with open(log_path(d), "rb") as f:
-        f.seek(i * LOG_REC)
-        return parse(f.read(LOG_REC).decode().rstrip())
+def records(buf):
+    """Decode a run of log records. They are sliced as BYTES and decoded one
+    by one -- slicing decoded text would shift every boundary after the first
+    multi-byte character."""
+    return [parse(buf[i * LOG_REC:(i + 1) * LOG_REC].decode().rstrip())
+            for i in range(len(buf) // LOG_REC)]
 
 
 def log_slice(d, lo, hi):
-    """Memories [lo,hi) in one read. Records are sliced as BYTES and decoded
-    one by one -- slicing decoded text would shift every boundary after the
-    first multi-byte character."""
+    """Memories [lo,hi) in one read."""
     with open(log_path(d), "rb") as f:
         f.seek(lo * LOG_REC)
-        buf = f.read((hi - lo) * LOG_REC)
-    return [parse(buf[i * LOG_REC:(i + 1) * LOG_REC].decode().rstrip())
-            for i in range(hi - lo)]
+        return records(f.read((hi - lo) * LOG_REC))
+
+
+def log_get(d, i):
+    """(id, date, text) of memory i, in one seek."""
+    return log_slice(d, i, i + 1)[0]
+
+
+def log_scan(d):
+    """Every memory, streamed. A search reads the whole log by nature, but it
+    must not HOLD it: at a million memories that is 300 MB."""
+    with open(log_path(d), "rb") as f:
+        while True:
+            buf = f.read(LOG_REC * 4096)
+            if not buf:
+                return
+            for e in records(buf):
+                yield e
 
 
 def tree_get(d, lo, hi):
@@ -329,6 +361,20 @@ def plural(n, word):
     return "%d %ss" % (n, word)
 
 
+def block_id(s):
+    """Parse `<lo>-<hi>` as wake and the nap prompts print it: inclusive at
+    both ends, and a real block -- an aligned power-of-two range. Without the
+    shape check, `4-5` and `5-6` read the same record."""
+    m = re.fullmatch(r"(\d+)-(\d+)", s)
+    if not m:
+        die("'%s' is not a block id. Copy it from the prompt." % s)
+    lo, hi = int(m.group(1)), int(m.group(2)) + 1
+    n = hi - lo
+    if n < 2 or n & (n - 1) or lo % n:
+        die("%s is not a block. Copy the id printed by wake, like 16-31." % s)
+    return lo, hi
+
+
 def check(text):
     text = text.strip()
     if not text:
@@ -379,7 +425,7 @@ def nap_prompt(d, lo, hi, left):
         for a, b in ((lo, mid), (mid, hi)):
             s = tree_get(d, a, b)
             if s is None:
-                die("Summary %d-%d is missing. Run: memo nap" % (a, b - 1))
+                die("Summary %d-%d is missing. Run: %s nap" % (a, b - 1, ME))
             halves.append("  #%d-%d %s" % (a, b - 1, s))
         body = "\n".join(halves)
     tail = "" if not left else "\n%s after this one." % (
@@ -389,8 +435,8 @@ def nap_prompt(d, lo, hi, left):
             "Keep what has lasting effect, drop what does not. Invent "
             "nothing.\n\n"
             "%s\n%s\n"
-            "Run: memo nap %d-%d \"<your line>\""
-            % (lo, hi - 1, ENTRY_CHARS, body, tail, lo, hi - 1))
+            "Run: %s nap %d-%d \"<your line>\""
+            % (lo, hi - 1, ENTRY_CHARS, body, tail, ME, lo, hi - 1))
 
 
 def next_nap(d, T):
@@ -448,20 +494,13 @@ def cmd_init(d, args):
     pastes into their agent's instruction file. Re-running it is safe: it
     only ever creates what is missing, and never rewrites what is there."""
     if args:
-        die("usage: memo init")
+        die("usage: %s init" % ME)
     fresh = not os.path.isdir(d)
     os.makedirs(os.path.join(d, "TREE"), exist_ok=True)
     open(log_path(d), "a").close()
     if not os.path.exists(os.path.join(d, "config")):
         write_config(d, {})
     config(d)
-    home = os.path.expanduser("~")
-
-    def pretty(p):
-        # as the user would type it: keep symlinks, fold $HOME to ~
-        p = os.path.abspath(p)
-        return "~" + p[len(home):] if p.startswith(home + os.sep) else p
-
     if fresh:
         print("Created %s: this machine's memory, one identity, forever." % pretty(d))
     else:
@@ -470,8 +509,7 @@ def cmd_init(d, args):
     print()
     print("Paste this at the top of your agent's AGENTS.md (or CLAUDE.md), done:")
     print()
-    print(TEMPLATE.format(memo=pretty(__file__), data=pretty(d),
-                          chars=ENTRY_CHARS).rstrip())
+    print(TEMPLATE.format(memo=ME, data=pretty(d), chars=ENTRY_CHARS).rstrip())
 
 
 def paginate(lines):
@@ -494,17 +532,18 @@ def cmd_wake(d, args):
     k, T = 1, now
     if args:
         if len(args) > 2 or not all(a.isdigit() for a in args):
-            die("usage: memo wake [part [T]]")
+            die("usage: %s wake [part [T]]" % ME)
         k = int(args[0])
         if len(args) == 2:
             T = int(args[1])
             if T > now:
-                die("T=%d, but the memory holds %s. Run: memo wake"
-                    % (T, plural(now, "entry")))
+                die("T=%d, but the memory holds %s. Run: %s wake"
+                    % (T, plural(now, "entry"), ME))
     # A part is rendered as of T, so a note landing between two parts cannot
     # shift a boundary and drop a line.
     if not T:
-        print("No memories yet. Record the first with: memo note \"<one line>\"")
+        print("No memories yet. Record the first with: %s note \"<one line>\""
+              % ME)
         print("You are awake.")
         return
     lines = []
@@ -519,17 +558,17 @@ def cmd_wake(d, args):
                 # is handed over after the read instead, costing no round
                 # trip.
                 print("Cannot wake: the memory context needs #%d-%d, which is "
-                      "not compressed yet.\nDo the %s below, then run memo "
+                      "not compressed yet.\nDo the %s below, then run %s "
                       "wake again.\n"
                       % (lo, hi - 1,
-                         plural(pending_count(d, T), "compression")))
+                         plural(pending_count(d, T), "compression"), ME))
                 print(next_nap(d, T))
                 sys.exit(1)
             lines.append("#%d-%d %s" % (lo, hi - 1, s))
     parts = paginate(lines)
     if not 1 <= k <= len(parts):
-        die("No part %d: the memory has %s. Run: memo wake"
-            % (k, plural(len(parts), "part")))
+        die("No part %d: the memory has %s. Run: %s wake"
+            % (k, plural(len(parts), "part"), ME))
     if len(parts) > 1:
         # The count is here so the T in `memo wake 2 296` reads as what it
         # is: the snapshot this document was written from.
@@ -540,7 +579,7 @@ def cmd_wake(d, args):
         # This footer is the only instruction that survives every harness's
         # truncation (pi drops the HEAD of a long output), so it has to say
         # both that the read is unfinished and how to continue it.
-        print("Not awake yet. Run: memo wake %d %d" % (k + 1, T))
+        print("Not awake yet. Run: %s wake %d %d" % (ME, k + 1, T))
     else:
         # always, even for a one-part memory: the contract an agent is given
         # is "run parts until one says awake", so it must always arrive
@@ -552,7 +591,8 @@ def cmd_wake(d, args):
 
 def cmd_note(d, args):
     if len(args) != 1:
-        die("usage: memo note \"<one line, at most %d chars>\"" % ENTRY_CHARS)
+        die("usage: %s note \"<one line, at most %d chars>\""
+            % (ME, ENTRY_CHARS))
     text = check(args[0])
     i = log_append(d, [(datetime.date.today().isoformat(), text)])
     print("Saved as #%d." % i)
@@ -566,11 +606,8 @@ def cmd_nap(d, args):
     if args:
         said = True
         if len(args) != 2:
-            die("usage: memo nap <lo>-<hi> \"<one line>\"")
-        m = re.fullmatch(r"(\d+)-(\d+)", args[0])
-        if not m:
-            die("'%s' is not a block id. Copy it from the prompt." % args[0])
-        lo, hi = int(m.group(1)), int(m.group(2)) + 1
+            die("usage: %s nap <lo>-<hi> \"<one line>\"" % ME)
+        lo, hi = block_id(args[0])
         todo = pending(d, T, limit=1)
         if not todo:
             print("Nothing left to compress.")
@@ -580,8 +617,8 @@ def cmd_nap(d, args):
                 print("%d-%d is already settled." % (lo, hi - 1))
             else:
                 die("Wrong block: %s. Blocks are built in order; the next is "
-                    "%d-%d. Run: memo nap"
-                    % (args[0], todo[0][0], todo[0][1] - 1))
+                    "%d-%d. Run: %s nap"
+                    % (args[0], todo[0][0], todo[0][1] - 1, ME))
         elif not tree_put(d, lo, hi, check(args[1])):
             print("%d-%d was settled or forgotten meanwhile." % (lo, hi - 1))
         else:
@@ -602,8 +639,8 @@ def cmd_config(d, args):
         k, eq, v = a.partition("=")
         k = k.strip().upper()
         if not eq or k not in KNOBS:
-            die("usage: memo config [NAME=VALUE ...]   # NAME one of %s"
-                % ", ".join(KNOBS))
+            die("usage: %s config [NAME=VALUE ...]   # NAME one of %s"
+                % (ME, ", ".join(KNOBS)))
         if v.strip():
             over[k] = size(k, v.strip())
         else:
@@ -621,60 +658,51 @@ def cmd_forget(d, args):
     everything built on top of it; the next nap computes them again. The log
     is untouched, so nothing is ever actually lost."""
     if len(args) != 1:
-        die("usage: memo forget <lo>-<hi>")
-    m = re.fullmatch(r"(\d+)-(\d+)", args[0])
-    if not m:
-        die("'%s' is not a block id." % args[0])
-    lo, hi = int(m.group(1)), int(m.group(2)) + 1
-    size = hi - lo
-    if size < 2 or size & (size - 1) or lo % size:
-        die("%s is not a block. Copy the id printed by wake, like 16-31."
-            % args[0])
-    gone = tree_drop(d, lo, hi)
+        die("usage: %s forget <lo>-<hi>" % ME)
+    gone = tree_drop(d, *block_id(args[0]))
     if not gone:
         die("No summary at %s." % args[0])
-    print("Forgot %s, from %d-%d up. Run: memo nap"
-          % (plural(len(gone), "summary"), gone[0][0], gone[0][1] - 1))
+    print("Forgot %s, from %d-%d up. Run: %s nap"
+          % (plural(len(gone), "summary"), gone[0][0], gone[0][1] - 1, ME))
 
 
 def cmd_recall(d, args):
     if len(args) != 1:
-        die("usage: memo recall <regex>")
+        die("usage: %s recall <regex>" % ME)
     try:
         pat = re.compile(args[0], re.I)
     except re.error as e:
         die("bad regex: %s" % e)
-    hits = [e for e in log_slice(d, 0, log_len(d))
-            if pat.search("#%d %s %s" % e)]
+    # One pass, keeping only the newest matches that fit the cap `wake`
+    # respects -- a vague regex matches the whole log, and the whole log does
+    # not fit in a harness's output or in memory.
+    hits, out, size = 0, deque(), 0
+    for e in log_scan(d):
+        line = "#%d %s %s" % e
+        if not pat.search(line):
+            continue
+        hits += 1
+        out.append(line)
+        size += len(line.encode()) + 1
+        while size > PART_CHARS:
+            size -= len(out.popleft().encode()) + 1
     if not hits:
         print("No match.")
         return
-    # Newest first is what a search is usually for, and the output has to fit
-    # the same cap `wake` respects.
-    out, size = [], 0
-    for e in reversed(hits):
-        line = "#%d %s %s" % e
-        size += len(line.encode()) + 1
-        if size > PART_CHARS:
-            break
-        out.append(line)
-    print("\n".join(reversed(out)))
-    if len(out) < len(hits):
+    print("\n".join(out))
+    if len(out) < hits:
         print("Newest %d of %s. Narrow the regex."
-              % (len(out), plural(len(hits), "match")))
+              % (len(out), plural(hits, "match")))
     else:
-        print("%s." % plural(len(hits), "match"))
+        print("%s." % plural(hits, "match"))
 
 
 def cmd_import(d, args):
     """Bulk-append historical memories: 'YYYY-MM-DD <text>' per line.
     For bootstrapping an identity from older records. Used once."""
     if len(args) != 1:
-        die("usage: memo import <file>   # lines of 'YYYY-MM-DD <text>'")
-    try:
-        src = open(args[0]).readlines()
-    except OSError as e:
-        die("Cannot read %s: %s" % (args[0], e.strerror))
+        die("usage: %s import <file>   # lines of 'YYYY-MM-DD <text>'" % ME)
+    src = open(args[0]).readlines()
     last = log_get(d, log_len(d) - 1)[1] if log_len(d) else "0000-00-00"
     out = []
     for i, line in enumerate(src, 1):
@@ -699,7 +727,7 @@ def cmd_import(d, args):
           % (plural(len(out), "memory"), base, base + len(out) - 1))
     n = pending_count(d, log_len(d))
     if n:
-        print("%s pending. Run: memo nap" % plural(n, "compression"))
+        print("%s pending. Run: %s nap" % (plural(n, "compression"), ME))
 
 
 COMMANDS = {"init": cmd_init, "wake": cmd_wake, "note": cmd_note,
@@ -708,23 +736,30 @@ COMMANDS = {"init": cmd_init, "wake": cmd_wake, "note": cmd_note,
 
 
 def main():
+    usage = __doc__.strip().format(memo=ME)
     if len(sys.argv) < 2:
-        print(__doc__.strip())
+        print(usage)
         sys.exit(0)
     cmd = sys.argv[1]
     if cmd not in COMMANDS:
         print("No such command: %s\n" % cmd, file=sys.stderr)
-        print(__doc__.strip(), file=sys.stderr)
+        print(usage, file=sys.stderr)
         sys.exit(1)
-    # `init` is the only command that may run without an existing memory:
-    # it is the one that creates it. Every other command refuses, so a typo
-    # in MEMORY_DIR is an error instead of a second, empty identity.
-    if cmd == "init":
-        cmd_init(memory_dir(), sys.argv[2:])
-        return
-    d = store()
-    config(d)
-    COMMANDS[cmd](d, sys.argv[2:])
+    try:
+        # `init` is the only command that may run without an existing memory:
+        # it is the one that creates it. Every other command refuses, so a
+        # typo in MEMORY_DIR is an error instead of a second, empty identity.
+        if cmd == "init":
+            cmd_init(memory_dir(), sys.argv[2:])
+            return
+        d = store()
+        config(d)
+        COMMANDS[cmd](d, sys.argv[2:])
+    except OSError as e:
+        # The filesystem is the one thing the tool does not control. Report it
+        # the way every other failure is reported: a Python traceback tells an
+        # agent nothing it can act on.
+        die("%s: %s." % (pretty(e.filename or memory_dir()), e.strerror or e))
 
 
 if __name__ == "__main__":

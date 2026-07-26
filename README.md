@@ -14,6 +14,9 @@ It prints a `## Memory` block. Paste that at the top of your agent's
 `AGENTS.md` (or `CLAUDE.md`), and you are done. Run the same line again to
 update.
 
+The tool lands at `~/.optmem/memo`. Put `~/.optmem` on your `PATH` to type
+`memo` for short, as the rest of this page does.
+
 ## Commands
 
 | | |
@@ -49,7 +52,7 @@ a storage budget: change it whenever, in either direction, and nothing is
 recomputed.
 
 Records are fixed width, so position *is* identity and every lookup is one
-seek. At a million memories (607 MB), `wake` takes 0.03s.
+seek. At a million memories (608 MB), `wake` takes 0.03s.
 
 Set `$MEMORY_DIR` to keep `memory/` elsewhere — a synced folder, a git repo.
 
