@@ -325,7 +325,7 @@ function docFrame(n, a) {
   cx.globalAlpha = a === undefined ? 1 : a;
   rich("the *memory context* remains *constant-sized*", W/2, DOC.y - 26, 27);
   T(num(n) + " memories", W/2 - 195, rowY(9) + 42, 23, INK, "center");
-  T("16k tokens, always", W/2 + 195, rowY(9) + 42, 23, GREEN, "center");
+  T("8k tokens, always", W/2 + 195, rowY(9) + 42, 23, GREEN, "center");
   cx.globalAlpha = 1;
 }
 // the tree of blocks: 512 memories at the bottom, one block per size above

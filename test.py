@@ -214,7 +214,10 @@ check(r.stdout.rstrip().endswith("You are awake."),
 with open(os.path.join(d, "seed.txt"), "w") as f:
     day = datetime.date(2020, 1, 1)
     for i in range(N):
-        f.write("%s memory number %d, a thing that happened\n"
+        f.write("%s memory number %d, a thing that happened, was weighed "
+                "against the rest of the week, turned out to matter more than "
+                "anyone guessed at the time, and left a mark on every plan "
+                "that followed it\n"
                 % ((day + datetime.timedelta(days=i // 5)).isoformat(), i))
 r = run("import", os.path.join(d, "seed.txt"))
 check("Imported %d" % N in r.stdout, "import failed: " + r.stdout + r.stderr)
@@ -586,7 +589,7 @@ def fingerprint(path):
 # back, an empty value restores the default, and a wake obeys immediately --
 # nothing is recomputed, because a size only selects what gets printed.
 r = run("config", "WAKE_LINES=12")
-check("12" in r.stdout and "default 208" in r.stdout, "config did not set:\n" + r.stdout)
+check("12" in r.stdout and "default 96" in r.stdout, "config did not set:\n" + r.stdout)
 check(len(run("wake").stdout.splitlines()) <= 13, "wake ignored the new size")
 r = run("config", "WAKE_LINES=")
 check("default" not in r.stdout, "an empty value did not restore the default")
@@ -595,7 +598,7 @@ for bad in ("WAKE_LINES=0", "WAKE_LINES=x", "ENTRY_CHARS=999", "NOPE=1", "WAKE_L
     check(run("config", bad).returncode == 1, "config accepted %s" % bad)
 
 with open(os.path.join(d, "config"), "a") as f:
-    f.write("WAKE_LINES=120\n")          # a size the user tuned by hand
+    f.write("WAKE_LINES=12\n")           # a size the user tuned by hand
 before = fingerprint(d)
 check(len(before) > 3 and before["LOG.txt"], "the store under test is empty")
 for _ in range(3):
